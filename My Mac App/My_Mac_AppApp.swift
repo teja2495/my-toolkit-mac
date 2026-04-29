@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct My_Mac_AppApp: App {
+    @StateObject private var bootstrapper = AppBootstrapper()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(bootstrapper: bootstrapper)
+                .frame(minWidth: 560, minHeight: 420)
         }
     }
 }

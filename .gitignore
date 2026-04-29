@@ -1,0 +1,34 @@
+# Xcode
+*.xcworkspace
+!*.xcworkspace/contents.xcworkspacedata
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.icloud
+
+# Build output
+build/
+
+# Instruments
+*.trace
+
+# Crashlytics
+com_crashlytics_export_strings.csv
+crashlytics-build.properties
+fabric.properties
