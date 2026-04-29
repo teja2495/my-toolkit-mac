@@ -1,39 +1,173 @@
+import ApplicationServices
+import AppKit
 import CoreGraphics
 import Foundation
 
+struct WindowInfo: Identifiable {
+    let id: CGWindowID
+    let title: String
+    let isMinimized: Bool
+    let accessibilityIndex: Int?
+    let ownerProcessIdentifier: pid_t
+}
+
 final class AppWindowTitleProvider {
-    func windowTitles(for processIdentifier: pid_t) -> [String] {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let windowInfoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+    func windows(for processIdentifier: pid_t, bundleIdentifier: String?) -> [WindowInfo] {
+        let primaryWindows = windowsForSingleProcess(processIdentifier, bundleIdentifier: bundleIdentifier)
+        if !primaryWindows.isEmpty {
+            return primaryWindows
+        }
+
+        guard let bundleIdentifier, !bundleIdentifier.isEmpty else {
             return []
         }
 
-        var titles: [String] = []
-        var seenTitles = Set<String>()
+        let siblingProcesses = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .filter { $0.processIdentifier != processIdentifier && $0.activationPolicy == .regular }
 
-        for windowInfo in windowInfoList {
-            guard let windowOwnerPID = windowInfo[kCGWindowOwnerPID as String] as? Int else {
-                continue
+        for sibling in siblingProcesses {
+            let siblingWindows = windowsForSingleProcess(
+                sibling.processIdentifier,
+                bundleIdentifier: bundleIdentifier
+            )
+            if !siblingWindows.isEmpty {
+                return siblingWindows
             }
-
-            guard pid_t(windowOwnerPID) == processIdentifier else {
-                continue
-            }
-
-            let windowLayer = windowInfo[kCGWindowLayer as String] as? Int ?? 0
-            guard windowLayer == 0 else { continue }
-
-            let alpha = windowInfo[kCGWindowAlpha as String] as? Double ?? 1
-            guard alpha > 0 else { continue }
-
-            let rawTitle = windowInfo[kCGWindowName as String] as? String ?? ""
-            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty, !seenTitles.contains(title) else { continue }
-
-            seenTitles.insert(title)
-            titles.append(title)
         }
 
-        return titles
+        return []
+    }
+
+    private func windowsForSingleProcess(
+        _ processIdentifier: pid_t,
+        bundleIdentifier: String?
+    ) -> [WindowInfo] {
+        let accessibilityWindows = windowsFromAccessibility(for: processIdentifier)
+        if !accessibilityWindows.isEmpty {
+            return normalizeTitlesIfNeeded(accessibilityWindows, bundleIdentifier: bundleIdentifier)
+        }
+
+        let coreGraphicsWindows = windowsFromCoreGraphics(for: processIdentifier)
+        return normalizeTitlesIfNeeded(coreGraphicsWindows, bundleIdentifier: bundleIdentifier)
+    }
+
+    private func windowsFromAccessibility(for processIdentifier: pid_t) -> [WindowInfo] {
+        let axApp = AXUIElementCreateApplication(processIdentifier)
+        var ref: CFTypeRef?
+
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
+              let axWindows = ref as? [AXUIElement] else { return [] }
+
+        return axWindows.enumerated().compactMap { index, axWindow in
+            guard stringAttribute(kAXRoleAttribute as String, from: axWindow) == (kAXWindowRole as String) else {
+                return nil
+            }
+
+            let rawTitle = stringAttribute(kAXTitleAttribute as String, from: axWindow) ?? ""
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            let isMinimized = boolAttribute(kAXMinimizedAttribute as String, from: axWindow) ?? false
+
+            return WindowInfo(
+                id: CGWindowID(index + 1),
+                title: title,
+                isMinimized: isMinimized,
+                accessibilityIndex: index,
+                ownerProcessIdentifier: processIdentifier
+            )
+        }
+    }
+
+    private func windowsFromCoreGraphics(for processIdentifier: pid_t) -> [WindowInfo] {
+        let options: CGWindowListOption = [.excludeDesktopElements]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        var results: [WindowInfo] = []
+        for info in list {
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? Int,
+                  pid_t(ownerPID) == processIdentifier else { continue }
+
+            let layer = info[kCGWindowLayer as String] as? Int ?? 0
+            guard layer == 0 else { continue }
+
+            let isOnScreen = info[kCGWindowIsOnscreen as String] as? Bool ?? true
+            let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
+
+            // Off-screen windows with no alpha are hidden, not minimized — skip them
+            if !isOnScreen && alpha <= 0 { continue }
+
+            guard let windowID = info[kCGWindowNumber as String] as? CGWindowID else { continue }
+
+            let rawTitle = info[kCGWindowName as String] as? String ?? ""
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+
+            results.append(
+                WindowInfo(
+                    id: windowID,
+                    title: title,
+                    isMinimized: !isOnScreen,
+                    accessibilityIndex: nil,
+                    ownerProcessIdentifier: processIdentifier
+                )
+            )
+        }
+
+        return results
+    }
+
+    private func stringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    private func boolAttribute(_ attribute: String, from element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? Bool
+    }
+
+    private func normalizeTitlesIfNeeded(
+        _ windows: [WindowInfo],
+        bundleIdentifier: String?
+    ) -> [WindowInfo] {
+        guard isVSCodeBundle(bundleIdentifier) else { return windows }
+
+        return windows.map { window in
+            WindowInfo(
+                id: window.id,
+                title: normalizedVSCodeTitle(window.title),
+                isMinimized: window.isMinimized,
+                accessibilityIndex: window.accessibilityIndex,
+                ownerProcessIdentifier: window.ownerProcessIdentifier
+            )
+        }
+    }
+
+    private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.microsoft.VSCode"
+            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
+    }
+
+    private func normalizedVSCodeTitle(_ title: String) -> String {
+        for separator in [" - ", " — ", " – "] {
+            guard title.contains(separator) else { continue }
+            let parts = title
+                .components(separatedBy: separator)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if let lastPart = parts.last, !lastPart.isEmpty {
+                return lastPart
+            }
+        }
+        return title
     }
 }

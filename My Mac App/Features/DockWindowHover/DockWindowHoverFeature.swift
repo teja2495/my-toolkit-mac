@@ -6,12 +6,13 @@ final class DockWindowHoverFeature: AppFeature {
     let id = "dock-window-hover"
 
     private let hoverDetector = DockHoverDetector()
-    private let windowTitleProvider = AppWindowTitleProvider()
+    private let windowProvider = AppWindowTitleProvider()
     private let popupController = DockWindowPopupController()
 
     private var pollTimer: Timer?
     private var lastHoveredApplication: DockHoveredApplication?
-    private var cachedWindowTitles: [String] = []
+    private var lastDockItemFrame: CGRect = .zero
+    private var cachedWindows: [WindowInfo] = []
     private var lastWindowRefreshDate: Date = .distantPast
 
     func start() {
@@ -33,42 +34,41 @@ final class DockWindowHoverFeature: AppFeature {
         pollTimer = nil
 
         lastHoveredApplication = nil
-        cachedWindowTitles = []
+        lastDockItemFrame = .zero
+        cachedWindows = []
         popupController.hide()
     }
 
     private func updateHoverState() {
         let mouseLocation = NSEvent.mouseLocation
 
-        // Keep the popup open while the cursor is over it so the user can
-        // interact with its contents.
+        // Stay open while the cursor is inside the popup itself.
         if popupController.isVisible, popupController.frameOnScreen.contains(mouseLocation) {
             return
         }
 
         guard let hoveredApplication = hoverDetector.hoveredApplication(at: mouseLocation) else {
             lastHoveredApplication = nil
-            cachedWindowTitles = []
+            cachedWindows = []
             popupController.hide()
             return
         }
 
+        lastDockItemFrame = hoveredApplication.dockItemFrame
         let isSameApp = hoveredApplication == lastHoveredApplication
 
         if !isSameApp || shouldRefreshWindows() {
-            cachedWindowTitles = windowTitleProvider.windowTitles(for: hoveredApplication.processIdentifier)
+            cachedWindows = windowProvider.windows(
+                for: hoveredApplication.processIdentifier,
+                bundleIdentifier: hoveredApplication.bundleIdentifier
+            )
             lastWindowRefreshDate = Date()
         }
 
         if isSameApp {
-            // Same icon still hovered: refresh contents but don't move the panel,
-            // otherwise Dock magnification would jiggle the popup.
-            popupController.updateContent(
-                appName: hoveredApplication.displayName,
-                windowTitles: cachedWindowTitles
-            )
+            popupController.updateContent(for: hoveredApplication, windows: cachedWindows)
         } else {
-            popupController.show(for: hoveredApplication, windowTitles: cachedWindowTitles)
+            popupController.show(for: hoveredApplication, windows: cachedWindows)
             lastHoveredApplication = hoveredApplication
         }
     }

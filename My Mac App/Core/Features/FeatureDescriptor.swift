@@ -5,4 +5,5 @@ struct FeatureDescriptor: Identifiable {
     let title: String
     let summary: String
     let requiresAccessibilityAccess: Bool
+    var isEnabled: Bool
 }

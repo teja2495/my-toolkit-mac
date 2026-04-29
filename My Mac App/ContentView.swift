@@ -55,19 +55,32 @@ struct ContentView: View {
                 ForEach(bootstrapper.availableFeatures) { feature in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(feature.title)
-                                .font(.headline)
-                            if feature.requiresAccessibilityAccess {
-                                Text("Accessibility")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(Color.secondary.opacity(0.15))
-                                    .clipShape(Capsule())
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(feature.title)
+                                        .font(.headline)
+                                    if feature.requiresAccessibilityAccess {
+                                        Text("Accessibility")
+                                            .font(.caption)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(feature.summary)
+                                    .foregroundStyle(.secondary)
                             }
+                            Spacer()
+                            Toggle(isOn: Binding(
+                                get: { feature.isEnabled },
+                                set: { _ in bootstrapper.toggleFeature(id: feature.id) }
+                            )) {
+                                EmptyView()
+                            }
+                            .toggleStyle(.switch)
+                            .disabled(!bootstrapper.accessibilityPermissionManager.isTrusted && feature.requiresAccessibilityAccess)
                         }
-                        Text(feature.summary)
-                            .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)

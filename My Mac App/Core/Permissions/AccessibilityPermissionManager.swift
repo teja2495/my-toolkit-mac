@@ -7,6 +7,20 @@ import Combine
 final class AccessibilityPermissionManager: ObservableObject {
     @Published private(set) var isTrusted = AXIsProcessTrusted()
 
+    func resetAccessibilityPermission() {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.tk.My-Mac-App"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "Accessibility", bundleIdentifier]
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            NSLog("Failed to reset Accessibility permission for %@: %@", bundleIdentifier, error.localizedDescription)
+        }
+    }
+
     func refreshStatus() {
         isTrusted = AXIsProcessTrusted()
     }
