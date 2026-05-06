@@ -12,39 +12,35 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("My Mac App")
-                .font(.largeTitle)
-                .bold()
+            HStack(spacing: 10) {
+                Text("My Mac App")
+                    .font(.largeTitle)
+                    .bold()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label(
-                    bootstrapper.accessibilityPermissionManager.isTrusted
-                        ? "Accessibility Permission Granted"
-                        : "Accessibility Permission Required",
-                    systemImage: bootstrapper.accessibilityPermissionManager.isTrusted
-                        ? "checkmark.shield.fill"
-                        : "exclamationmark.shield"
-                )
-                .foregroundStyle(
-                    bootstrapper.accessibilityPermissionManager.isTrusted
-                        ? Color.green
-                        : Color.orange
-                )
+                Spacer()
 
-                if !bootstrapper.accessibilityPermissionManager.isTrusted {
-                    Text("Grant Accessibility permission so app features can detect Dock icons and read active window metadata.")
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 12) {
-                        Button("Request Permission") {
-                            bootstrapper.requestAccessibilityAccess()
-                        }
-
-                        Button("Open Accessibility Settings") {
-                            bootstrapper.accessibilityPermissionManager.openSystemSettings()
+                Button {
+                    guard !bootstrapper.accessibilityPermissionManager.isTrusted else { return }
+                    bootstrapper.requestAccessibilityAccess()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "shield.fill")
+                            .foregroundStyle(
+                                bootstrapper.accessibilityPermissionManager.isTrusted
+                                    ? Color.green
+                                    : Color.orange
+                            )
+                        if !bootstrapper.accessibilityPermissionManager.isTrusted {
+                            Text("Grant Permission")
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .help(
+                    bootstrapper.accessibilityPermissionManager.isTrusted
+                        ? "Accessibility permission granted"
+                        : "Grant accessibility permission"
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -56,18 +52,8 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(feature.title)
-                                        .font(.headline)
-                                    if feature.requiresAccessibilityAccess {
-                                        Text("Accessibility")
-                                            .font(.caption)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 2)
-                                            .background(Color.secondary.opacity(0.15))
-                                            .clipShape(Capsule())
-                                    }
-                                }
+                                Text(feature.title)
+                                    .font(.headline)
                                 Text(feature.summary)
                                     .foregroundStyle(.secondary)
                             }
@@ -80,6 +66,27 @@ struct ContentView: View {
                             }
                             .toggleStyle(.switch)
                             .disabled(!bootstrapper.accessibilityPermissionManager.isTrusted && feature.requiresAccessibilityAccess)
+                        }
+
+                        if feature.id == "dock-window-hover", feature.isEnabled {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Popup delay")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text("\(Int((bootstrapper.dockHoverPopupDelay * 1000).rounded())) ms")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Slider(
+                                    value: $bootstrapper.dockHoverPopupDelay,
+                                    in: 0...1.5,
+                                    step: 0.05
+                                )
+                            }
+                            .padding(.top, 8)
                         }
                     }
                     .padding(10)

@@ -5,7 +5,11 @@ import Combine
 
 @MainActor
 final class AccessibilityPermissionManager: ObservableObject {
-    @Published private(set) var isTrusted = AXIsProcessTrusted()
+    @Published private(set) var isTrusted = false
+
+    init() {
+        refreshStatus()
+    }
 
     func resetAccessibilityPermission() {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.tk.My-Mac-App"
@@ -22,7 +26,8 @@ final class AccessibilityPermissionManager: ObservableObject {
     }
 
     func refreshStatus() {
-        isTrusted = AXIsProcessTrusted()
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+        isTrusted = AXIsProcessTrustedWithOptions(options)
     }
 
     func requestAccessIfNeeded() {

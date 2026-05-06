@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import SwiftUI
 
 @MainActor
@@ -55,6 +56,9 @@ final class DockWindowPopupController {
                 appIcon: icon,
                 appName: app.displayName,
                 windows: Array(windows.prefix(8)),
+                onHide: { [weak self] in
+                    self?.hideApplication(processIdentifier: app.processIdentifier)
+                },
                 onQuit: { [weak self] in
                     self?.quitApplication(processIdentifier: app.processIdentifier)
                 },
@@ -212,16 +216,45 @@ final class DockWindowPopupController {
         return CGSize(width: width, height: height)
     }
 
+    private func hideApplication(processIdentifier: pid_t) {
+        guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
+        _ = app.hide()
+        Task { @MainActor in
+            await waitForApplicationTransition {
+                app.isHidden
+            }
+            hide()
+        }
+    }
+
     private func quitApplication(processIdentifier: pid_t) {
         guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
         _ = app.terminate()
-        hide()
+        Task { @MainActor in
+            await waitForApplicationTransition {
+                app.isTerminated
+            }
+            hide()
+        }
     }
 
     private func forceQuitApplication(processIdentifier: pid_t) {
         guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
         _ = app.forceTerminate()
-        hide()
+        Task { @MainActor in
+            await waitForApplicationTransition {
+                app.isTerminated
+            }
+            hide()
+        }
+    }
+
+    private func waitForApplicationTransition(condition: @escaping () -> Bool) async {
+        if condition() { return }
+        for _ in 0..<15 {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if condition() { return }
+        }
     }
 
     private func frame(for size: CGSize, anchoredTo dockItemFrame: CGRect) -> CGRect {
@@ -248,19 +281,23 @@ private struct DockWindowPopupView: View {
     let appIcon: NSImage?
     let appName: String
     let windows: [WindowInfo]
+    let onHide: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
     let onOpen: (WindowInfo) -> Void
     let onClose: (WindowInfo) -> Void
     let onNewWindow: () -> Void
+    @StateObject private var modifierKeyState = ModifierKeyState()
 
     var body: some View {
         VStack(spacing: 6) {
             AppHeaderRow(
                 icon: appIcon,
                 name: appName,
+                onHide: onHide,
                 onQuit: onQuit,
-                onForceQuit: onForceQuit
+                onForceQuit: onForceQuit,
+                modifierKeyState: modifierKeyState
             )
 
             ForEach(windows) { window in
@@ -296,8 +333,10 @@ private struct DockWindowPopupView: View {
 private struct AppHeaderRow: View {
     let icon: NSImage?
     let name: String
+    let onHide: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
+    @ObservedObject var modifierKeyState: ModifierKeyState
 
     var body: some View {
         HStack(spacing: 10) {
@@ -316,15 +355,19 @@ private struct AppHeaderRow: View {
 
             Spacer(minLength: 4)
 
-            QuitActionButton(action: onQuit)
-            ForceQuitActionButton(action: onForceQuit)
+            HideActionButton(action: onHide)
+            PowerActionButton(
+                isCommandPressed: modifierKeyState.isCommandPressed,
+                onQuit: onQuit,
+                onForceQuit: onForceQuit
+            )
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
     }
 }
 
-private struct QuitActionButton: View {
+private struct HideActionButton: View {
     let action: () -> Void
 
     var body: some View {
@@ -338,17 +381,60 @@ private struct QuitActionButton: View {
     }
 }
 
-private struct ForceQuitActionButton: View {
-    let action: () -> Void
+private struct PowerActionButton: View {
+    let isCommandPressed: Bool
+    let onQuit: () -> Void
+    let onForceQuit: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            if isCommandPressed {
+                onForceQuit()
+            } else {
+                onQuit()
+            }
+        }) {
             Image(systemName: "power")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(isCommandPressed ? Color.red : Color.white)
                 .frame(width: 20, height: 20)
         }
         .buttonStyle(.plain)
+    }
+}
+
+@MainActor
+private final class ModifierKeyState: ObservableObject {
+    @Published private(set) var isCommandPressed: Bool = NSEvent.modifierFlags.contains(.command)
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+
+    init() {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.update(from: event.modifierFlags)
+            return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            Task { @MainActor in
+                self?.update(from: event.modifierFlags)
+            }
+        }
+    }
+
+    deinit {
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+        }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+        }
+    }
+
+    private func update(from flags: NSEvent.ModifierFlags) {
+        let pressed = flags.contains(.command)
+        if isCommandPressed != pressed {
+            isCommandPressed = pressed
+        }
     }
 }
 
