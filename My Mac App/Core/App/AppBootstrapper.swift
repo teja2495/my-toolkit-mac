@@ -12,6 +12,13 @@ final class AppBootstrapper: ObservableObject {
 
     @Published private(set) var availableFeatures: [FeatureDescriptor] = [
         FeatureDescriptor(
+            id: "corner-notes",
+            title: "Bottom-Right Quick Notes",
+            summary: "Opens a two-pane todo checklist and note window from the bottom-right corner.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "dock-window-hover",
             title: "Dock App Windows Popup",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
@@ -75,18 +82,34 @@ final class AppBootstrapper: ObservableObject {
     }
 
     private func updateFeatureLifecycle() {
+        ensureFeatureExists(CornerNotesFeature())
+
         if accessibilityPermissionManager.isTrusted {
-            if liveFeatures.isEmpty {
-                let feature = DockWindowHoverFeature()
-                feature.popupDelay = max(0, dockHoverPopupDelay)
-                liveFeatures[feature.id] = feature
-                if availableFeatures.first(where: { $0.id == feature.id })?.isEnabled == true {
-                    feature.start()
-                }
-            }
-        } else {
-            liveFeatures.values.forEach { $0.stop() }
-            liveFeatures = [:]
+            let feature = DockWindowHoverFeature()
+            feature.popupDelay = max(0, dockHoverPopupDelay)
+            ensureFeatureExists(feature)
+        } else if let feature = liveFeatures.removeValue(forKey: "dock-window-hover") {
+            feature.stop()
         }
+
+        for descriptor in availableFeatures {
+            guard let feature = liveFeatures[descriptor.id] else { continue }
+            if descriptor.isEnabled {
+                feature.start()
+            } else {
+                feature.stop()
+            }
+        }
+    }
+
+    private func ensureFeatureExists(_ feature: AppFeature) {
+        guard liveFeatures[feature.id] == nil else {
+            if let dockFeature = liveFeatures[feature.id] as? DockWindowHoverFeature {
+                dockFeature.popupDelay = max(0, dockHoverPopupDelay)
+            }
+            return
+        }
+
+        liveFeatures[feature.id] = feature
     }
 }
