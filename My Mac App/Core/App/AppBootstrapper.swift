@@ -100,6 +100,13 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var accessibilityFeaturesMasterEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(accessibilityFeaturesMasterEnabled, forKey: Self.accessibilityFeaturesMasterEnabledKey)
+            updateFeatureLifecycle()
+        }
+    }
+
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
@@ -108,6 +115,7 @@ final class AppBootstrapper: ObservableObject {
     private static let writingFixRulesKey = "writingFixRules"
     private static let writingFixTriggerKey = "writingFixTrigger"
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
+    private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
     private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -121,6 +129,7 @@ final class AppBootstrapper: ObservableObject {
         textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
+        accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         Self.ensureDefaultShortcut(for: writingFixRules)
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
@@ -192,7 +201,8 @@ final class AppBootstrapper: ObservableObject {
 
         for descriptor in availableFeatures {
             guard let feature = liveFeatures[descriptor.id] else { continue }
-            if descriptor.isEnabled {
+            let canRun = !(descriptor.requiresAccessibilityAccess && !accessibilityFeaturesMasterEnabled)
+            if descriptor.isEnabled && canRun {
                 feature.start()
             } else {
                 feature.stop()

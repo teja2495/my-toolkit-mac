@@ -295,7 +295,7 @@ final class DockWindowPopupController {
     ) -> CGSize {
         let rowCount: Int
         if isVSCodeBundle(app.bundleIdentifier) {
-            rowCount = max(1, vscodeFolderShortcuts.count)
+            rowCount = vscodeFolderShortcuts.count
         } else {
             rowCount = Array(windows.prefix(8)).count + 1 // Include "New Window".
         }
@@ -424,24 +424,14 @@ private struct DockWindowPopupView: View {
             )
 
             if isVSCodeApp {
-                if vscodeFolderShortcuts.isEmpty {
+                ForEach(vscodeFolderShortcuts) { shortcut in
                     WindowRow(
                         icon: appIcon,
-                        title: "No folders configured",
-                        subtitle: "Add folders in settings",
-                        onOpen: nil,
+                        title: shortcutDisplayName(for: shortcut.path),
+                        subtitle: shortcut.path,
+                        onOpen: { onOpenVSCodeFolder(shortcut) },
                         onClose: nil
                     )
-                } else {
-                    ForEach(vscodeFolderShortcuts) { shortcut in
-                        WindowRow(
-                            icon: appIcon,
-                            title: shortcutDisplayName(for: shortcut.path),
-                            subtitle: shortcut.path,
-                            onOpen: { onOpenVSCodeFolder(shortcut) },
-                            onClose: nil
-                        )
-                    }
                 }
             } else {
                 ForEach(windows) { window in

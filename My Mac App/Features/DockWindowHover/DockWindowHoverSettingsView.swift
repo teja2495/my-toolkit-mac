@@ -84,6 +84,14 @@ struct DockWindowHoverSettingsView: View {
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
 
+                        SettingsRow(
+                            "Accessibility features",
+                            description: "Master switch for all features that require accessibility permission."
+                        ) {
+                            Toggle("", isOn: $bootstrapper.accessibilityFeaturesMasterEnabled)
+                                .labelsHidden()
+                        }
+
                         if bootstrapper.vscodeFolderShortcuts.isEmpty {
                             Text("No folders added yet.")
                                 .font(.system(size: 11))
@@ -98,12 +106,12 @@ struct DockWindowHoverSettingsView: View {
                         }
 
                         Button {
-                            addVSCodeFolders()
+                            addVSCodeFolder()
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "plus")
                                     .font(.system(size: 10, weight: .semibold))
-                                Text("Add folders")
+                                Text("Add folder")
                                     .font(.system(size: 12, weight: .medium))
                             }
                             .padding(.horizontal, 12)
@@ -189,35 +197,32 @@ struct DockWindowHoverSettingsView: View {
         )
     }
 
-    private func addVSCodeFolders() {
+    private func addVSCodeFolder() {
+        bootstrapper.accessibilityFeaturesMasterEnabled = false
+
         let panel = NSOpenPanel()
-        panel.title = "Select folders to show in VS Code popup"
-        panel.prompt = "Add Folders"
+        panel.title = "Select a folder to show in VS Code popup"
+        panel.prompt = "Add Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = true
+        panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
         panel.resolvesAliases = true
 
         bootstrapper.setDockWindowHoverSuspended(true)
 
-        let addSelectedFolders: ([URL]) -> Void = { urls in
-            guard !urls.isEmpty else { return }
+        let addSelectedFolder: (URL?) -> Void = { url in
+            guard let url else { return }
             bootstrapper.vscodeFolderShortcuts.append(
-                contentsOf: urls.map { VSCodeFolderShortcut(path: $0.standardizedFileURL.path) }
+                VSCodeFolderShortcut(path: url.standardizedFileURL.path)
             )
+            bootstrapper.accessibilityFeaturesMasterEnabled = true
         }
 
-        if let keyWindow = NSApp.keyWindow {
-            panel.beginSheetModal(for: keyWindow) { response in
-                defer { bootstrapper.setDockWindowHoverSuspended(false) }
-                guard response == .OK else { return }
-                addSelectedFolders(panel.urls)
-            }
-        } else {
-            defer { bootstrapper.setDockWindowHoverSuspended(false) }
-            guard panel.runModal() == .OK else { return }
-            addSelectedFolders(panel.urls)
+        panel.begin { response in
+            bootstrapper.setDockWindowHoverSuspended(false)
+            guard response == .OK else { return }
+            addSelectedFolder(panel.url)
         }
     }
 
