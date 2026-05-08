@@ -139,12 +139,25 @@ final class AppWindowTitleProvider {
         _ windows: [WindowInfo],
         bundleIdentifier: String?
     ) -> [WindowInfo] {
-        guard isVSCodeBundle(bundleIdentifier) else { return windows }
+        let normalizer: ((String) -> String)?
+        if isVSCodeBundle(bundleIdentifier) {
+            normalizer = normalizedVSCodeTitle
+        } else if isChromeBundle(bundleIdentifier) {
+            normalizer = normalizedChromeTitle
+        } else if isTeamsBundle(bundleIdentifier) {
+            normalizer = normalizedTeamsTitle
+        } else if isSlackBundle(bundleIdentifier) {
+            normalizer = normalizedSlackTitle
+        } else {
+            normalizer = nil
+        }
+
+        guard let normalizer else { return windows }
 
         return windows.map { window in
             WindowInfo(
                 id: window.id,
-                title: normalizedVSCodeTitle(window.title),
+                title: normalizer(window.title),
                 isMinimized: window.isMinimized,
                 accessibilityIndex: window.accessibilityIndex,
                 ownerProcessIdentifier: window.ownerProcessIdentifier
@@ -158,6 +171,23 @@ final class AppWindowTitleProvider {
             || bundleIdentifier == "com.microsoft.VSCodeInsiders"
     }
 
+    private func isChromeBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.google.Chrome"
+            || bundleIdentifier == "com.google.Chrome.beta"
+            || bundleIdentifier == "com.google.Chrome.canary"
+    }
+
+    private func isTeamsBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.microsoft.teams2"
+            || bundleIdentifier == "com.microsoft.teams"
+    }
+
+    private func isSlackBundle(_ bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == "com.tinyspeck.slackmacgap"
+    }
+
     private func normalizedVSCodeTitle(_ title: String) -> String {
         for separator in [" - ", " — ", " – "] {
             guard title.contains(separator) else { continue }
@@ -167,6 +197,30 @@ final class AppWindowTitleProvider {
             if let lastPart = parts.last, !lastPart.isEmpty {
                 return lastPart
             }
+        }
+        return title
+    }
+
+    // "Tab Name - Google Chrome - Profile Name" → "Tab Name - Profile Name"
+    private func normalizedChromeTitle(_ title: String) -> String {
+        let parts = title
+            .components(separatedBy: " - ")
+            .filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) != "Google Chrome" }
+        return parts.joined(separator: " - ")
+    }
+
+    // "Something | Microsoft Teams" → "Something"
+    private func normalizedTeamsTitle(_ title: String) -> String {
+        if let range = title.range(of: " | Microsoft Teams", options: .backwards) {
+            return String(title[title.startIndex..<range.lowerBound])
+        }
+        return title
+    }
+
+    // "Something - Slack" → "Something"
+    private func normalizedSlackTitle(_ title: String) -> String {
+        if title.hasSuffix(" - Slack") {
+            return String(title.dropLast(" - Slack".count))
         }
         return title
     }
