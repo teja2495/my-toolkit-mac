@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class DockWindowPopupController {
     private let panel: NSPanel
+    private let windowProvider = AppWindowTitleProvider()
     private var hostingController: NSHostingController<AnyView>
     private var latestFocusRequestID: UInt64 = 0
 
@@ -50,12 +51,14 @@ final class DockWindowPopupController {
 
     private func setView(for app: DockHoveredApplication, windows: [WindowInfo]) {
         let icon = NSRunningApplication(processIdentifier: app.processIdentifier)?.icon
+        let isAppFocused = NSRunningApplication(processIdentifier: app.processIdentifier)?.isActive ?? false
         let foregroundProcessIdentifier = app.processIdentifier
         hostingController.rootView = AnyView(
             DockWindowPopupView(
                 appIcon: icon,
                 appName: app.displayName,
                 windows: Array(windows.prefix(8)),
+                isAppFocused: isAppFocused,
                 onHide: { [weak self] in
                     self?.hideApplication(processIdentifier: app.processIdentifier)
                 },
@@ -69,7 +72,11 @@ final class DockWindowPopupController {
                     self?.focusWindow(windowInfo, foregroundProcessIdentifier: foregroundProcessIdentifier)
                 },
                 onClose: { [weak self] windowInfo in
-                    self?.closeWindow(windowInfo)
+                    self?.closeWindow(
+                        windowInfo,
+                        for: app,
+                        visibleWindows: windows
+                    )
                 },
                 onNewWindow: { [weak self] in
                     self?.openNewWindow(processIdentifier: app.processIdentifier)
@@ -147,32 +154,83 @@ final class DockWindowPopupController {
         }
     }
 
-    private func closeWindow(_ windowInfo: WindowInfo) {
+    private func closeWindow(
+        _ windowInfo: WindowInfo,
+        for app: DockHoveredApplication,
+        visibleWindows: [WindowInfo]
+    ) {
         let pid = windowInfo.ownerProcessIdentifier
         let axApp = AXUIElementCreateApplication(pid)
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
               let axWindows = ref as? [AXUIElement] else { return }
 
-        for (index, axWindow) in axWindows.enumerated() {
-            if let accessibilityIndex = windowInfo.accessibilityIndex, accessibilityIndex != index {
+        guard let axWindow = matchingAXWindow(in: axWindows, for: windowInfo) else { return }
+
+        var closeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &closeRef) == .success,
+              let closeButton = closeRef else { return }
+
+        AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
+        let remainingWindows = visibleWindows.filter { !isSameWindow($0, as: windowInfo) }
+        if remainingWindows.isEmpty {
+            hide()
+            return
+        }
+
+        Task { @MainActor in
+            // Allow the target app a moment to apply the close action, then refresh from source of truth.
+            try? await Task.sleep(nanoseconds: 70_000_000)
+            let refreshedWindows = windowProvider.windows(
+                for: app.processIdentifier,
+                bundleIdentifier: app.bundleIdentifier
+            )
+            if refreshedWindows.isEmpty {
+                hide()
+            } else {
+                updateContent(for: app, windows: Array(refreshedWindows.prefix(8)))
+            }
+        }
+    }
+
+    private func matchingAXWindow(in axWindows: [AXUIElement], for windowInfo: WindowInfo) -> AXUIElement? {
+        if axWindows.count == 1 {
+            return axWindows[0]
+        }
+
+        if let accessibilityIndex = windowInfo.accessibilityIndex,
+           axWindows.indices.contains(accessibilityIndex) {
+            return axWindows[accessibilityIndex]
+        }
+
+        let targetTitle = windowInfo.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !targetTitle.isEmpty else { return nil }
+
+        for axWindow in axWindows {
+            var titleRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef) == .success,
+                  let title = (titleRef as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else {
                 continue
             }
-
-            var titleRef: CFTypeRef?
-            if windowInfo.accessibilityIndex == nil {
-                guard AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleRef) == .success,
-                      (titleRef as? String) == windowInfo.title else { continue }
+            if title == targetTitle {
+                return axWindow
             }
-
-            var closeRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &closeRef) == .success,
-                  let closeButton = closeRef else { continue }
-
-            AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
-            hide()
-            break
         }
+
+        return nil
+    }
+
+    private func isSameWindow(_ lhs: WindowInfo, as rhs: WindowInfo) -> Bool {
+        if lhs.ownerProcessIdentifier != rhs.ownerProcessIdentifier {
+            return false
+        }
+
+        if let leftAccessibilityIndex = lhs.accessibilityIndex,
+           let rightAccessibilityIndex = rhs.accessibilityIndex {
+            return leftAccessibilityIndex == rightAccessibilityIndex
+        }
+
+        return lhs.id == rhs.id && lhs.title == rhs.title
     }
 
     private func openNewWindow(processIdentifier: pid_t) {
@@ -281,6 +339,7 @@ private struct DockWindowPopupView: View {
     let appIcon: NSImage?
     let appName: String
     let windows: [WindowInfo]
+    let isAppFocused: Bool
     let onHide: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
@@ -294,6 +353,7 @@ private struct DockWindowPopupView: View {
             AppHeaderRow(
                 icon: appIcon,
                 name: appName,
+                showsHideButton: isAppFocused,
                 onHide: onHide,
                 onQuit: onQuit,
                 onForceQuit: onForceQuit,
@@ -333,6 +393,7 @@ private struct DockWindowPopupView: View {
 private struct AppHeaderRow: View {
     let icon: NSImage?
     let name: String
+    let showsHideButton: Bool
     let onHide: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
@@ -355,7 +416,9 @@ private struct AppHeaderRow: View {
 
             Spacer(minLength: 4)
 
-            HideActionButton(action: onHide)
+            if showsHideButton && !modifierKeyState.isCommandPressed {
+                HideActionButton(action: onHide)
+            }
             PowerActionButton(
                 isCommandPressed: modifierKeyState.isCommandPressed,
                 onQuit: onQuit,
@@ -372,10 +435,17 @@ private struct HideActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 20, height: 20)
+            HStack(spacing: 0) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+            )
         }
         .buttonStyle(.plain)
     }
@@ -394,10 +464,22 @@ private struct PowerActionButton: View {
                 onQuit()
             }
         }) {
-            Image(systemName: "power")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(isCommandPressed ? Color.red : Color.white)
-                .frame(width: 20, height: 20)
+            HStack(spacing: 6) {
+                Image(systemName: "power")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(isCommandPressed ? "Force Quit" : "Quit")
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundStyle(isCommandPressed ? Color.red : Color.white)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .layoutPriority(1)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isCommandPressed ? Color.red.opacity(0.16) : Color.white.opacity(0.16))
+            )
         }
         .buttonStyle(.plain)
     }

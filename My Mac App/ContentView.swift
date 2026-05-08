@@ -20,7 +20,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 480, ideal: 560)
         }
         .navigationSplitViewStyle(.balanced)
-        .containerBackground(.thinMaterial, for: .window)
+        .containerBackground(.regularMaterial, for: .window)
         .onAppear {
             if selection == nil {
                 selection = defaultSelection
