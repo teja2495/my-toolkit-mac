@@ -2,6 +2,16 @@ import AppKit
 import Combine
 import Foundation
 
+struct VSCodeFolderShortcut: Identifiable, Codable, Equatable {
+    let id: UUID
+    var path: String
+
+    init(id: UUID = UUID(), path: String) {
+        self.id = id
+        self.path = path
+    }
+}
+
 @MainActor
 final class AppBootstrapper: ObservableObject {
     @Published var dockHoverPopupDelay: Double {
@@ -74,6 +84,22 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var vscodeFolderShortcuts: [VSCodeFolderShortcut] {
+        didSet {
+            let safeShortcuts = Self.sanitizedVSCodeFolderShortcuts(vscodeFolderShortcuts)
+            if vscodeFolderShortcuts != safeShortcuts {
+                vscodeFolderShortcuts = safeShortcuts
+                return
+            }
+
+            if let encodedShortcuts = try? JSONEncoder().encode(safeShortcuts) {
+                UserDefaults.standard.set(encodedShortcuts, forKey: Self.vscodeFolderShortcutsKey)
+            }
+
+            (liveFeatures["dock-window-hover"] as? DockWindowHoverFeature)?.vscodeFolderShortcuts = safeShortcuts
+        }
+    }
+
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
@@ -81,6 +107,7 @@ final class AppBootstrapper: ObservableObject {
     private static let defaultDockHoverPopupDelay = 0.25
     private static let writingFixRulesKey = "writingFixRules"
     private static let writingFixTriggerKey = "writingFixTrigger"
+    private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -93,6 +120,7 @@ final class AppBootstrapper: ObservableObject {
         dockHoverPopupDelay = savedDelay ?? Self.defaultDockHoverPopupDelay
         textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
+        vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         Self.ensureDefaultShortcut(for: writingFixRules)
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
@@ -121,6 +149,10 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    func setDockWindowHoverSuspended(_ isSuspended: Bool) {
+        (liveFeatures["dock-window-hover"] as? DockWindowHoverFeature)?.isSuspended = isSuspended
+    }
+
     private func startPermissionWatchdog() {
         permissionRefreshTimer?.invalidate()
         permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -142,6 +174,7 @@ final class AppBootstrapper: ObservableObject {
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()
             feature.popupDelay = max(0, dockHoverPopupDelay)
+            feature.vscodeFolderShortcuts = vscodeFolderShortcuts
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())
@@ -171,6 +204,7 @@ final class AppBootstrapper: ObservableObject {
         guard liveFeatures[feature.id] == nil else {
             if let dockFeature = liveFeatures[feature.id] as? DockWindowHoverFeature {
                 dockFeature.popupDelay = max(0, dockHoverPopupDelay)
+                dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
             }
             if let writingFixFeature = liveFeatures[feature.id] as? WritingFixFeature {
                 writingFixFeature.rules = writingFixRules
@@ -181,6 +215,10 @@ final class AppBootstrapper: ObservableObject {
             return
         }
 
+        if let dockFeature = feature as? DockWindowHoverFeature {
+            dockFeature.popupDelay = max(0, dockHoverPopupDelay)
+            dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
+        }
         if let writingFixFeature = feature as? WritingFixFeature {
             writingFixFeature.rules = writingFixRules
         }
@@ -231,6 +269,31 @@ final class AppBootstrapper: ObservableObject {
         return sanitizedRules([
             WritingFixRule(trigger: fallbackTrigger, prompt: defaultWritingFixPrompt)
         ])
+    }
+
+    private static func loadVSCodeFolderShortcuts() -> [VSCodeFolderShortcut] {
+        guard let data = UserDefaults.standard.data(forKey: vscodeFolderShortcutsKey),
+              let decoded = try? JSONDecoder().decode([VSCodeFolderShortcut].self, from: data) else {
+            return []
+        }
+        return sanitizedVSCodeFolderShortcuts(decoded)
+    }
+
+    private static func sanitizedVSCodeFolderShortcuts(
+        _ shortcuts: [VSCodeFolderShortcut]
+    ) -> [VSCodeFolderShortcut] {
+        var seenPaths: Set<String> = []
+        return shortcuts.compactMap { shortcut in
+            let trimmedPath = shortcut.path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPath.isEmpty else { return nil }
+
+            let expandedPath = (trimmedPath as NSString).expandingTildeInPath
+            let standardizedPath = URL(fileURLWithPath: expandedPath).standardizedFileURL.path
+            guard !standardizedPath.isEmpty else { return nil }
+            guard !seenPaths.contains(standardizedPath) else { return nil }
+            seenPaths.insert(standardizedPath)
+            return VSCodeFolderShortcut(id: shortcut.id, path: standardizedPath)
+        }
     }
 
     private static func sanitizedRules(_ rules: [WritingFixRule]) -> [WritingFixRule] {

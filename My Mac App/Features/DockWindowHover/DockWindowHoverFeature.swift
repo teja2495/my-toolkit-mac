@@ -5,6 +5,20 @@ import Foundation
 final class DockWindowHoverFeature: AppFeature {
     let id = "dock-window-hover"
     var popupDelay: TimeInterval = 0.25
+    var vscodeFolderShortcuts: [VSCodeFolderShortcut] = []
+    var isSuspended: Bool = false {
+        didSet {
+            if isSuspended {
+                lastHoveredApplication = nil
+                pendingHoveredApplication = nil
+                pendingHoverStartDate = nil
+                rightClickSuppressedApplication = nil
+                rightClickSuppressedDockItemFrame = nil
+                cachedWindows = []
+                popupController.hide()
+            }
+        }
+    }
 
     private let hoverDetector = DockHoverDetector()
     private let windowProvider = AppWindowTitleProvider()
@@ -60,6 +74,10 @@ final class DockWindowHoverFeature: AppFeature {
     }
 
     private func updateHoverState() {
+        if isSuspended {
+            return
+        }
+
         let mouseLocation = NSEvent.mouseLocation
 
         // Stay open while the cursor is inside the popup itself.
@@ -110,7 +128,11 @@ final class DockWindowHoverFeature: AppFeature {
             guard hasSatisfiedPopupDelay() else { return }
         }
 
-        if !isSameApp || shouldRefreshWindows() {
+        let isVSCode = isVSCodeBundle(hoveredApplication.bundleIdentifier)
+        if isVSCode {
+            cachedWindows = []
+            lastWindowRefreshDate = Date()
+        } else if !isSameApp || shouldRefreshWindows() {
             cachedWindows = windowProvider.windows(
                 for: hoveredApplication.processIdentifier,
                 bundleIdentifier: hoveredApplication.bundleIdentifier
@@ -119,9 +141,17 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         if isSameApp {
-            popupController.updateContent(for: hoveredApplication, windows: cachedWindows)
+            popupController.updateContent(
+                for: hoveredApplication,
+                windows: cachedWindows,
+                vscodeFolderShortcuts: vscodeFolderShortcuts
+            )
         } else {
-            popupController.show(for: hoveredApplication, windows: cachedWindows)
+            popupController.show(
+                for: hoveredApplication,
+                windows: cachedWindows,
+                vscodeFolderShortcuts: vscodeFolderShortcuts
+            )
             lastHoveredApplication = hoveredApplication
             pendingHoveredApplication = nil
             pendingHoverStartDate = nil
@@ -148,5 +178,11 @@ final class DockWindowHoverFeature: AppFeature {
         rightClickSuppressedDockItemFrame = clickedApplication.dockItemFrame
         cachedWindows = []
         popupController.hide()
+    }
+
+    private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.microsoft.VSCode"
+            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
     }
 }

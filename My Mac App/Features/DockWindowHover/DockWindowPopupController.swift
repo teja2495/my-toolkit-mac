@@ -32,16 +32,24 @@ final class DockWindowPopupController {
     var isVisible: Bool { panel.isVisible }
     var frameOnScreen: CGRect { panel.frame }
 
-    func show(for app: DockHoveredApplication, windows: [WindowInfo]) {
-        setView(for: app, windows: windows)
-        let size = preferredSize(for: windows)
+    func show(
+        for app: DockHoveredApplication,
+        windows: [WindowInfo],
+        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    ) {
+        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
+        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
         panel.orderFrontRegardless()
     }
 
-    func updateContent(for app: DockHoveredApplication, windows: [WindowInfo]) {
-        setView(for: app, windows: windows)
-        let size = preferredSize(for: windows)
+    func updateContent(
+        for app: DockHoveredApplication,
+        windows: [WindowInfo],
+        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    ) {
+        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
+        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
     }
 
@@ -49,15 +57,22 @@ final class DockWindowPopupController {
         panel.orderOut(nil)
     }
 
-    private func setView(for app: DockHoveredApplication, windows: [WindowInfo]) {
+    private func setView(
+        for app: DockHoveredApplication,
+        windows: [WindowInfo],
+        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    ) {
         let icon = NSRunningApplication(processIdentifier: app.processIdentifier)?.icon
         let isAppFocused = NSRunningApplication(processIdentifier: app.processIdentifier)?.isActive ?? false
         let foregroundProcessIdentifier = app.processIdentifier
+        let isVSCodeApp = isVSCodeBundle(app.bundleIdentifier)
         hostingController.rootView = AnyView(
             DockWindowPopupView(
                 appIcon: icon,
                 appName: app.displayName,
                 windows: Array(windows.prefix(8)),
+                vscodeFolderShortcuts: vscodeFolderShortcuts,
+                isVSCodeApp: isVSCodeApp,
                 isAppFocused: isAppFocused,
                 onHide: { [weak self] in
                     self?.hideApplication(processIdentifier: app.processIdentifier)
@@ -80,6 +95,12 @@ final class DockWindowPopupController {
                 },
                 onNewWindow: { [weak self] in
                     self?.openNewWindow(processIdentifier: app.processIdentifier)
+                },
+                onOpenVSCodeFolder: { [weak self] shortcut in
+                    self?.openVSCodeFolder(
+                        shortcut,
+                        processIdentifier: app.processIdentifier
+                    )
                 }
             )
         )
@@ -188,7 +209,11 @@ final class DockWindowPopupController {
             if refreshedWindows.isEmpty {
                 hide()
             } else {
-                updateContent(for: app, windows: Array(refreshedWindows.prefix(8)))
+                updateContent(
+                    for: app,
+                    windows: Array(refreshedWindows.prefix(8)),
+                    vscodeFolderShortcuts: []
+                )
             }
         }
     }
@@ -263,15 +288,44 @@ final class DockWindowPopupController {
         keyUp?.post(tap: .cghidEventTap)
     }
 
-    private func preferredSize(for windows: [WindowInfo]) -> CGSize {
-        let visibleWindows = Array(windows.prefix(8))
-        let windowCount = visibleWindows.count + 1 // Always include "New Window"
+    private func preferredSize(
+        for app: DockHoveredApplication,
+        windows: [WindowInfo],
+        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    ) -> CGSize {
+        let rowCount: Int
+        if isVSCodeBundle(app.bundleIdentifier) {
+            rowCount = max(1, vscodeFolderShortcuts.count)
+        } else {
+            rowCount = Array(windows.prefix(8)).count + 1 // Include "New Window".
+        }
         let width = 340.0
 
-        // 8px padding top + bottom, 44px app header, and window rows.
+        // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
-        height += 6.0 + CGFloat(windowCount) * 44.0 + CGFloat(windowCount - 1) * 6.0
+        height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(max(0, rowCount - 1)) * 6.0
         return CGSize(width: width, height: height)
+    }
+
+    private func openVSCodeFolder(_ shortcut: VSCodeFolderShortcut, processIdentifier: pid_t) {
+        let path = shortcut.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+
+        hide()
+        let folderURL = URL(fileURLWithPath: path, isDirectory: true)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+
+        if let app = NSRunningApplication(processIdentifier: processIdentifier),
+           let bundleURL = app.bundleURL {
+            NSWorkspace.shared.open(
+                [folderURL],
+                withApplicationAt: bundleURL,
+                configuration: configuration
+            ) { _, _ in }
+        } else {
+            NSWorkspace.shared.open(folderURL)
+        }
     }
 
     private func hideApplication(processIdentifier: pid_t) {
@@ -333,12 +387,20 @@ final class DockWindowPopupController {
 
         return CGRect(origin: origin, size: size)
     }
+
+    private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.microsoft.VSCode"
+            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
+    }
 }
 
 private struct DockWindowPopupView: View {
     let appIcon: NSImage?
     let appName: String
     let windows: [WindowInfo]
+    let vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    let isVSCodeApp: Bool
     let isAppFocused: Bool
     let onHide: () -> Void
     let onQuit: () -> Void
@@ -346,6 +408,7 @@ private struct DockWindowPopupView: View {
     let onOpen: (WindowInfo) -> Void
     let onClose: (WindowInfo) -> Void
     let onNewWindow: () -> Void
+    let onOpenVSCodeFolder: (VSCodeFolderShortcut) -> Void
     @StateObject private var modifierKeyState = ModifierKeyState()
 
     var body: some View {
@@ -360,21 +423,45 @@ private struct DockWindowPopupView: View {
                 modifierKeyState: modifierKeyState
             )
 
-            ForEach(windows) { window in
+            if isVSCodeApp {
+                if vscodeFolderShortcuts.isEmpty {
+                    WindowRow(
+                        icon: appIcon,
+                        title: "No folders configured",
+                        subtitle: "Add folders in settings",
+                        onOpen: nil,
+                        onClose: nil
+                    )
+                } else {
+                    ForEach(vscodeFolderShortcuts) { shortcut in
+                        WindowRow(
+                            icon: appIcon,
+                            title: shortcutDisplayName(for: shortcut.path),
+                            subtitle: shortcut.path,
+                            onOpen: { onOpenVSCodeFolder(shortcut) },
+                            onClose: nil
+                        )
+                    }
+                }
+            } else {
+                ForEach(windows) { window in
+                    WindowRow(
+                        icon: appIcon,
+                        title: window.title,
+                        subtitle: nil,
+                        onOpen: { onOpen(window) },
+                        onClose: { onClose(window) }
+                    )
+                }
+
                 WindowRow(
                     icon: appIcon,
-                    title: window.title,
-                    onOpen: { onOpen(window) },
-                    onClose: { onClose(window) }
+                    title: "New Window",
+                    subtitle: nil,
+                    onOpen: onNewWindow,
+                    onClose: nil
                 )
             }
-
-            WindowRow(
-                icon: appIcon,
-                title: "New Window",
-                onOpen: onNewWindow,
-                onClose: nil
-            )
         }
         .padding(8)
         .background(
@@ -387,6 +474,12 @@ private struct DockWindowPopupView: View {
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
         )
         .preferredColorScheme(.dark)
+    }
+
+    private func shortcutDisplayName(for path: String) -> String {
+        let resolvedPath = (path as NSString).expandingTildeInPath
+        let folderName = URL(fileURLWithPath: resolvedPath).lastPathComponent
+        return folderName.isEmpty ? resolvedPath : folderName
     }
 }
 
@@ -523,6 +616,7 @@ private final class ModifierKeyState: ObservableObject {
 private struct WindowRow: View {
     let icon: NSImage?
     let title: String
+    let subtitle: String?
     let onOpen: (() -> Void)?
     let onClose: (() -> Void)?
 
@@ -534,11 +628,20 @@ private struct WindowRow: View {
                     .interpolation(.high)
                     .frame(width: 28, height: 28)
             }
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(.primary)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer(minLength: 4)
             if let onClose {
                 Button(action: onClose) {
@@ -564,5 +667,6 @@ private struct WindowRow: View {
         .onTapGesture {
             onOpen?()
         }
+        .opacity(onOpen == nil ? 0.75 : 1.0)
     }
 }

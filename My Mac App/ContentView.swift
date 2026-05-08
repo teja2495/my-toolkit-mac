@@ -15,6 +15,13 @@ struct ContentView: View {
         NavigationSplitView {
             SettingsSidebar(bootstrapper: bootstrapper, selection: $selection)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SidebarBackdrop())
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(width: 1)
+                }
         } detail: {
             SettingsDetail(bootstrapper: bootstrapper, section: selection)
                 .navigationSplitViewColumnWidth(min: 480, ideal: 560)
@@ -33,6 +40,14 @@ struct ContentView: View {
             return .feature(firstFeature.id)
         }
         return .permissions
+    }
+}
+
+private struct SidebarBackdrop: View {
+    var body: some View {
+        Color(nsColor: .windowBackgroundColor)
+            .opacity(0.92)
+            .ignoresSafeArea()
     }
 }
 
