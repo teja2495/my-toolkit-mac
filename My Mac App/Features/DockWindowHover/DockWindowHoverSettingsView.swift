@@ -14,7 +14,7 @@ struct DockWindowHoverSettingsView: View {
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
-            title: "Dock Window Popup",
+            title: "App Windows",
             subtitle: "Hover an app icon in the Dock to peek at its open windows by title."
         ) {
             featureToggle

@@ -248,7 +248,7 @@ struct TextExpanderSettingsView: View {
     }
 
     private func addNewEntry() {
-        let newEntry = TextExpanderEntry(shortcut: "hlo", expansion: "hello")
+        let newEntry = TextExpanderEntry(shortcut: "shortcut", expansion: "expanded text")
         bootstrapper.textExpanderEntries.append(newEntry)
         entryDrafts[newEntry.id] = EntryDraft(shortcut: newEntry.shortcut, expansion: newEntry.expansion)
         editingEntryID = newEntry.id

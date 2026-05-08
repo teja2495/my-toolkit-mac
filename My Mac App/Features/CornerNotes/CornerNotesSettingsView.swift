@@ -10,7 +10,7 @@ struct CornerNotesSettingsView: View {
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
-            title: "Quick Notes",
+            title: "Quick Notes & Tasks",
             subtitle: "A two-pane todo and notebook that opens from the bottom-right hot corner."
         ) {
             featureToggle

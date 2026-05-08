@@ -23,7 +23,7 @@ struct WritingFixSettingsView: View {
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
-            title: "Inline Grammar Fix",
+            title: "Rewritely",
             subtitle: "Type a trigger word at the end of any text field. Apple Intelligence rewrites the text in place."
         ) {
             featureToggle

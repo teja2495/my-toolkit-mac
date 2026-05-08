@@ -14,21 +14,21 @@ final class AppBootstrapper: ObservableObject {
     @Published private(set) var availableFeatures: [FeatureDescriptor] = [
         FeatureDescriptor(
             id: "corner-notes",
-            title: "Bottom-Right Quick Notes",
+            title: "Quick Notes & Tasks",
             summary: "Opens a two-pane todo checklist and note window from the bottom-right corner.",
             requiresAccessibilityAccess: false,
             isEnabled: true
         ),
         FeatureDescriptor(
             id: "dock-window-hover",
-            title: "Dock App Windows Popup",
+            title: "App Windows",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
             requiresAccessibilityAccess: true,
             isEnabled: true
         ),
         FeatureDescriptor(
             id: "writing-fix",
-            title: "Inline Grammar Fix",
+            title: "Rewritely",
             summary: "Type a trigger at the end of focused text to fix grammar and typos with Apple Intelligence.",
             requiresAccessibilityAccess: true,
             isEnabled: true
@@ -194,7 +194,7 @@ final class AppBootstrapper: ObservableObject {
            let decoded = try? JSONDecoder().decode([TextExpanderEntry].self, from: data) {
             return sanitizedEntries(decoded)
         }
-        return [TextExpanderEntry(shortcut: "hlo", expansion: "hello")]
+        return []
     }
 
     private static func sanitizedEntries(_ entries: [TextExpanderEntry]) -> [TextExpanderEntry] {
