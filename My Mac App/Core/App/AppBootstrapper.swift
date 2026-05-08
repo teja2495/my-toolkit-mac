@@ -30,6 +30,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
+            id: "system-health",
+            title: "System Health",
+            summary: "Shows a menu bar health dot for CPU, memory, disk, battery, and swap usage.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "dock-window-hover",
             title: "App Windows",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
@@ -179,6 +186,7 @@ final class AppBootstrapper: ObservableObject {
 
     private func updateFeatureLifecycle() {
         ensureFeatureExists(CornerNotesFeature())
+        ensureFeatureExists(SystemHealthFeature())
 
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()
