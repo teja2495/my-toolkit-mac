@@ -32,6 +32,7 @@ struct CornerNotesView: View {
         }
         .frame(minWidth: 620, minHeight: 380)
         .background(fontSizeShortcuts)
+        .preferredColorScheme(.dark)
         .overlay(alignment: .topTrailing) {
             pinButton
         }
@@ -75,34 +76,10 @@ struct CornerNotesView: View {
 
     // MARK: - Background
 
+    private static let darkBackground = Color(red: 0.118, green: 0.118, blue: 0.125)
+
     private var backgroundLayer: some View {
-        ZStack {
-            Rectangle().fill(.regularMaterial)
-
-            LinearGradient(
-                colors: [
-                    Self.amber.opacity(0.10),
-                    Color.clear,
-                    Color.black.opacity(0.05)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .blendMode(.plusLighter)
-            .opacity(0.6)
-
-            // Hairline top edge
-            VStack(spacing: 0) {
-                LinearGradient(
-                    colors: [Color.white.opacity(0.18), Color.clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 1)
-                Spacer()
-            }
-        }
-        .ignoresSafeArea()
+        Self.darkBackground.ignoresSafeArea()
     }
 
     // MARK: - Checklist pane
@@ -130,16 +107,7 @@ struct CornerNotesView: View {
             .animation(.snappy(duration: 0.28), value: store.todos.isEmpty)
 
         }
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.07),
-                    Color.black.opacity(0.02)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(Color.black.opacity(0.12))
     }
 
     private var checklistHeader: some View {
