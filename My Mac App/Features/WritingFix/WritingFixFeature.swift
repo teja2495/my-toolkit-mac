@@ -4,7 +4,15 @@ import Foundation
 @MainActor
 final class WritingFixFeature: AppFeature {
     let id = "writing-fix"
-    var rules: [WritingFixRule] = []
+    var rules: [WritingFixRule] = [] {
+        didSet {
+            guard pollTimer != nil else { return }
+            let oldIDs = Set(oldValue.map(\.id))
+            for rule in rules where !oldIDs.contains(rule.id) {
+                registerShortcutHandler(for: rule)
+            }
+        }
+    }
 
     private let resolver = FocusedTextInputResolver()
     private let corrector = GrammarTypoCorrector()
@@ -27,12 +35,65 @@ final class WritingFixFeature: AppFeature {
         if let pollTimer {
             RunLoop.main.add(pollTimer, forMode: .common)
         }
+
+        for rule in rules {
+            registerShortcutHandler(for: rule)
+        }
     }
 
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
         keyboardBuffer.stop()
+        isFixing = false
+    }
+
+    private func registerShortcutHandler(for rule: WritingFixRule) {
+        let ruleID = rule.id
+        KeyboardShortcuts.onKeyDown(for: rule.shortcutName) { [weak self] in
+            Task { @MainActor in
+                guard let self,
+                      let currentRule = self.rules.first(where: { $0.id == ruleID })
+                else { return }
+                await self.triggerFixViaShortcut(for: currentRule)
+            }
+        }
+    }
+
+    private func triggerFixViaShortcut(for rule: WritingFixRule) async {
+        guard !isFixing else { return }
+        guard let input = resolver.focusedTextInput() else { return }
+
+        let selected = resolver.selectedText(in: input)
+        let hasSelection = selected.map { !$0.isEmpty } ?? false
+
+        let textToFix: String
+        let useSelection: Bool
+
+        if hasSelection, let sel = selected {
+            textToFix = sel
+            useSelection = true
+        } else if let full = resolver.text(in: input), !full.isEmpty {
+            textToFix = full
+            useSelection = false
+        } else {
+            return
+        }
+
+        isFixing = true
+
+        do {
+            let corrected = try await corrector.correctedText(for: textToFix, promptTemplate: rule.prompt)
+            if useSelection {
+                _ = resolver.replaceSelectedText(in: input, with: corrected)
+            } else {
+                _ = resolver.replaceText(in: input, with: corrected)
+            }
+            keyboardBuffer.replaceLine(with: corrected)
+        } catch {
+            NSLog("Writing fix shortcut failed: %@", error.localizedDescription)
+        }
+
         isFixing = false
     }
 
@@ -90,7 +151,7 @@ final class WritingFixFeature: AppFeature {
 
         for candidate in candidates where searchableText.hasSuffix(candidate.trigger) {
             let fixedText = String(searchableText.dropLast(candidate.trigger.count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             return (candidate.rule, fixedText, searchableText.count)
         }
 

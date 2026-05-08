@@ -105,6 +105,7 @@ struct WritingFixSettingsView: View {
         let isEditing = editingRuleID == rule.id
 
         VStack(alignment: .leading, spacing: 10) {
+            // Trigger row
             HStack(alignment: .center, spacing: 10) {
                 Text("Trigger")
                     .font(.system(size: 9, weight: .semibold))
@@ -124,15 +125,29 @@ struct WritingFixSettingsView: View {
                         .focused($focusedTriggerID, equals: rule.id)
                         .onAppear { focusedTriggerID = rule.id }
                 } else {
-                    Text(triggerDraftBinding(for: rule.id).wrappedValue)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
+                    HStack(spacing: 8) {
+                        Text(triggerDraftBinding(for: rule.id).wrappedValue)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.accentColor.opacity(0.12))
+                            )
+
+                        if let shortcut = KeyboardShortcuts.getShortcut(for: rule.shortcutName) {
+                            Text(shortcut.description)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.primary.opacity(0.07))
+                                )
+                        }
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -177,6 +192,19 @@ struct WritingFixSettingsView: View {
                 }
             }
 
+            // Shortcut recorder (editing mode only)
+            if isEditing {
+                HStack(alignment: .center, spacing: 10) {
+                    Text("Shortcut")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
+
+                    KeyboardShortcuts.Recorder("", name: rule.shortcutName)
+                }
+            }
+
+            // Prompt section
             VStack(alignment: .leading, spacing: 6) {
                 Text("Prompt")
                     .font(.system(size: 9, weight: .semibold))

@@ -93,6 +93,7 @@ final class AppBootstrapper: ObservableObject {
         dockHoverPopupDelay = savedDelay ?? Self.defaultDockHoverPopupDelay
         textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
+        Self.ensureDefaultShortcut(for: writingFixRules)
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -207,6 +208,13 @@ final class AppBootstrapper: ObservableObject {
             seen.insert(shortcut)
             return TextExpanderEntry(id: entry.id, shortcut: shortcut, expansion: expansion)
         }
+    }
+
+    private static func ensureDefaultShortcut(for rules: [WritingFixRule]) {
+        guard let firstRule = rules.first,
+              KeyboardShortcuts.getShortcut(for: firstRule.shortcutName) == nil
+        else { return }
+        KeyboardShortcuts.setShortcut(.init(.g, modifiers: [.command, .shift]), for: firstRule.shortcutName)
     }
 
     private static func loadWritingFixRules() -> [WritingFixRule] {

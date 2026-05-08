@@ -41,6 +41,16 @@ final class FocusedTextInputResolver {
         stringAttribute(kAXValueAttribute as String, from: input.element)
     }
 
+    func selectedText(in input: FocusedTextInput) -> String? {
+        stringAttribute(kAXSelectedTextAttribute as String, from: input.element)
+    }
+
+    func replaceSelectedText(in input: FocusedTextInput, with text: String) -> Bool {
+        _ = AXUIElementSetAttributeValue(input.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        pasteString(text, restoreCaretIn: input.element)
+        return true
+    }
+
     func replaceText(in input: FocusedTextInput, with correctedText: String) -> Bool {
         if input.canSetValue {
             let didSetValue = AXUIElementSetAttributeValue(
