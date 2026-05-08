@@ -9,6 +9,7 @@ struct WindowInfo: Identifiable {
     let isMinimized: Bool
     let accessibilityIndex: Int?
     let ownerProcessIdentifier: pid_t
+    let repositoryPath: String?
 }
 
 final class AppWindowTitleProvider {
@@ -43,7 +44,10 @@ final class AppWindowTitleProvider {
         _ processIdentifier: pid_t,
         bundleIdentifier: String?
     ) -> [WindowInfo] {
-        let accessibilityWindows = windowsFromAccessibility(for: processIdentifier)
+        let accessibilityWindows = windowsFromAccessibility(
+            for: processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        )
         if !accessibilityWindows.isEmpty {
             return normalizeTitlesIfNeeded(accessibilityWindows, bundleIdentifier: bundleIdentifier)
         }
@@ -52,13 +56,17 @@ final class AppWindowTitleProvider {
         return normalizeTitlesIfNeeded(coreGraphicsWindows, bundleIdentifier: bundleIdentifier)
     }
 
-    private func windowsFromAccessibility(for processIdentifier: pid_t) -> [WindowInfo] {
+    private func windowsFromAccessibility(
+        for processIdentifier: pid_t,
+        bundleIdentifier: String?
+    ) -> [WindowInfo] {
         let axApp = AXUIElementCreateApplication(processIdentifier)
         var ref: CFTypeRef?
 
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
               let axWindows = ref as? [AXUIElement] else { return [] }
 
+        let shouldResolveRepositoryPath = isVSCodeBundle(bundleIdentifier)
         return axWindows.enumerated().compactMap { index, axWindow in
             guard stringAttribute(kAXRoleAttribute as String, from: axWindow) == (kAXWindowRole as String) else {
                 return nil
@@ -68,13 +76,15 @@ final class AppWindowTitleProvider {
             let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { return nil }
             let isMinimized = boolAttribute(kAXMinimizedAttribute as String, from: axWindow) ?? false
+            let repositoryPath = shouldResolveRepositoryPath ? repositoryPathForVSCodeWindow(axWindow) : nil
 
             return WindowInfo(
                 id: CGWindowID(index + 1),
                 title: title,
                 isMinimized: isMinimized,
                 accessibilityIndex: index,
-                ownerProcessIdentifier: processIdentifier
+                ownerProcessIdentifier: processIdentifier,
+                repositoryPath: repositoryPath
             )
         }
     }
@@ -111,7 +121,8 @@ final class AppWindowTitleProvider {
                     title: title,
                     isMinimized: !isOnScreen,
                     accessibilityIndex: nil,
-                    ownerProcessIdentifier: processIdentifier
+                    ownerProcessIdentifier: processIdentifier,
+                    repositoryPath: nil
                 )
             )
         }
@@ -160,7 +171,8 @@ final class AppWindowTitleProvider {
                 title: normalizer(window.title),
                 isMinimized: window.isMinimized,
                 accessibilityIndex: window.accessibilityIndex,
-                ownerProcessIdentifier: window.ownerProcessIdentifier
+                ownerProcessIdentifier: window.ownerProcessIdentifier,
+                repositoryPath: window.repositoryPath
             )
         }
     }
@@ -223,5 +235,82 @@ final class AppWindowTitleProvider {
             return String(title.dropLast(" - Slack".count))
         }
         return title
+    }
+
+    private func repositoryPathForVSCodeWindow(_ window: AXUIElement) -> String? {
+        guard let documentPath = stringAttribute(kAXDocumentAttribute as String, from: window)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !documentPath.isEmpty else {
+            return nil
+        }
+
+        let documentURL: URL
+        if documentPath.hasPrefix("file://"), let fileURL = URL(string: documentPath), fileURL.isFileURL {
+            documentURL = fileURL
+        } else {
+            documentURL = URL(fileURLWithPath: documentPath)
+        }
+
+        guard documentURL.isFileURL else { return nil }
+        return repositoryURL(from: documentURL)?.path
+    }
+
+    private func repositoryURL(from documentURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        let standardizedURL = documentURL.standardizedFileURL
+        let path = standardizedURL.path
+
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
+
+        if exists && !isDirectory.boolValue {
+            if standardizedURL.pathExtension == "code-workspace" {
+                return standardizedURL
+            }
+
+            if let nearestRepositoryRoot = nearestRepositoryRoot(startingAt: standardizedURL.deletingLastPathComponent()) {
+                return nearestRepositoryRoot
+            }
+
+            let parentDirectory = standardizedURL.deletingLastPathComponent()
+            return fileManager.fileExists(atPath: parentDirectory.path) ? parentDirectory : nil
+        }
+
+        if exists && isDirectory.boolValue {
+            if let nearestRepositoryRoot = nearestRepositoryRoot(startingAt: standardizedURL) {
+                return nearestRepositoryRoot
+            }
+            return standardizedURL
+        }
+
+        if standardizedURL.pathExtension == "code-workspace" {
+            return standardizedURL
+        }
+
+        if let nearestRepositoryRoot = nearestRepositoryRoot(startingAt: standardizedURL.deletingLastPathComponent()) {
+            return nearestRepositoryRoot
+        }
+
+        return nil
+    }
+
+    private func nearestRepositoryRoot(startingAt url: URL) -> URL? {
+        let fileManager = FileManager.default
+        var currentURL = url.standardizedFileURL
+
+        while true {
+            let gitMarkerPath = currentURL.appendingPathComponent(".git").path
+            if fileManager.fileExists(atPath: gitMarkerPath) {
+                return currentURL
+            }
+
+            let parentURL = currentURL.deletingLastPathComponent()
+            if parentURL.path == currentURL.path {
+                break
+            }
+            currentURL = parentURL
+        }
+
+        return nil
     }
 }
