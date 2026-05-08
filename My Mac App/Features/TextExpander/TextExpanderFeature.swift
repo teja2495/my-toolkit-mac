@@ -7,11 +7,13 @@ final class TextExpanderFeature: AppFeature {
     var entries: [TextExpanderEntry] = []
 
     private let resolver = FocusedTextInputResolver()
+    private let keyboardBuffer = KeyboardTextBuffer.shared
     private var pollTimer: Timer?
     private var isExpanding = false
 
     func start() {
         guard pollTimer == nil else { return }
+        keyboardBuffer.start()
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -28,23 +30,28 @@ final class TextExpanderFeature: AppFeature {
     func stop() {
         pollTimer?.invalidate()
         pollTimer = nil
+        keyboardBuffer.stop()
         isExpanding = false
     }
 
     private func checkAndExpand() {
         guard !isExpanding else { return }
-        guard let input = resolver.focusedTextInput() else { return }
-        guard let text = resolver.text(in: input),
-              let match = matchedEntry(in: text)
-        else { return }
+        let input = resolver.focusedTextInput()
+        let text = input.flatMap { resolver.text(in: $0) } ?? keyboardBuffer.currentLine
+        guard let match = matchedEntry(in: text) else { return }
 
         isExpanding = true
-        let newText = match.prefix + match.entry.expansion + " "
-        _ = resolver.replaceText(in: input, with: newText)
+        let replacement = match.entry.expansion + " "
+        if let input, resolver.text(in: input) != nil {
+            _ = resolver.replaceSuffix(in: input, suffixLength: match.triggerLength, with: replacement)
+        } else {
+            _ = resolver.replaceFocusedSuffix(suffixLength: match.triggerLength, with: replacement)
+        }
+        keyboardBuffer.replaceSuffix(length: match.triggerLength, with: replacement)
         isExpanding = false
     }
 
-    private func matchedEntry(in text: String) -> (entry: TextExpanderEntry, prefix: String)? {
+    private func matchedEntry(in text: String) -> (entry: TextExpanderEntry, triggerLength: Int)? {
         let candidates = entries
             .filter { !$0.shortcut.isEmpty && !$0.expansion.isEmpty }
             .sorted { $0.shortcut.count > $1.shortcut.count }
@@ -58,7 +65,7 @@ final class TextExpanderFeature: AppFeature {
             // or be preceded by whitespace/punctuation to avoid partial-word matches.
             guard prefix.isEmpty || isWordBoundary(prefix.last!) else { continue }
 
-            return (candidate, prefix)
+            return (candidate, trigger.count)
         }
 
         return nil

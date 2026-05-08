@@ -57,6 +57,32 @@ final class FocusedTextInputResolver {
         return pasteReplacement(correctedText, into: input.element)
     }
 
+    func replaceSuffix(in input: FocusedTextInput, suffixLength: Int, with replacement: String) -> Bool {
+        guard suffixLength >= 0 else { return false }
+
+        if input.canSetValue {
+            guard let text = text(in: input), suffixLength <= text.count else { return false }
+            return replaceText(in: input, with: String(text.dropLast(suffixLength)) + replacement)
+        }
+
+        _ = AXUIElementSetAttributeValue(input.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        for _ in 0..<suffixLength {
+            sendKey(keyCode: 51, flags: []) // Delete
+        }
+        pasteString(replacement, restoreCaretIn: nil)
+        return true
+    }
+
+    func replaceFocusedSuffix(suffixLength: Int, with replacement: String) -> Bool {
+        guard suffixLength >= 0 else { return false }
+
+        for _ in 0..<suffixLength {
+            sendKey(keyCode: 51, flags: []) // Delete
+        }
+        pasteString(replacement, restoreCaretIn: nil)
+        return true
+    }
+
     func elementAtScreenPoint(_ point: CGPoint) -> AXUIElement? {
         guard let primaryScreen = NSScreen.screens.first else { return nil }
         let flippedY = primaryScreen.frame.height - point.y
@@ -89,6 +115,16 @@ final class FocusedTextInputResolver {
             if !candidates.contains(where: { isSameElement($0.0, editableAncestor) }) {
                 candidates.append((editableAncestor, true))
             }
+        }
+
+        var currentParent = elementAttribute(kAXParentAttribute as String, from: focusedElement)
+        var depth = 0
+        while let parent = currentParent, depth < 8 {
+            if !candidates.contains(where: { isSameElement($0.0, parent) }) {
+                candidates.append((parent, true))
+            }
+            currentParent = elementAttribute(kAXParentAttribute as String, from: parent)
+            depth += 1
         }
 
         return candidates
@@ -191,6 +227,13 @@ final class FocusedTextInputResolver {
     }
 
     private func pasteReplacement(_ replacement: String, into element: AXUIElement) -> Bool {
+        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        sendKey(keyCode: 0, flags: .maskCommand) // A
+        pasteString(replacement, restoreCaretIn: element)
+        return true
+    }
+
+    private func pasteString(_ string: String, restoreCaretIn element: AXUIElement?) {
         let pasteboard = NSPasteboard.general
         let existingItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
             let copy = NSPasteboardItem()
@@ -202,13 +245,13 @@ final class FocusedTextInputResolver {
             return copy
         }
 
-        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         pasteboard.clearContents()
-        pasteboard.setString(replacement, forType: .string)
+        pasteboard.setString(string, forType: .string)
 
-        sendKey(keyCode: 0, flags: .maskCommand) // A
         sendKey(keyCode: 9, flags: .maskCommand) // V
-        setCursorToEndWithDelay(of: element)
+        if let element {
+            setCursorToEndWithDelay(of: element)
+        }
 
         if let existingItems {
             Task { @MainActor in
@@ -217,8 +260,6 @@ final class FocusedTextInputResolver {
                 pasteboard.writeObjects(existingItems)
             }
         }
-
-        return true
     }
 
     private func setCursorToEndWithDelay(of element: AXUIElement) {
