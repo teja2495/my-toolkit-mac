@@ -14,7 +14,7 @@ struct My_Mac_AppApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(bootstrapper: bootstrapper)
-                .frame(minWidth: 560, minHeight: 420)
+                .frame(minWidth: 780, minHeight: 540)
         }
     }
 }

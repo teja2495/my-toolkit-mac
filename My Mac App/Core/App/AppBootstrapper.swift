@@ -32,8 +32,31 @@ final class AppBootstrapper: ObservableObject {
             summary: "Type a trigger at the end of focused text to fix grammar and typos with Apple Intelligence.",
             requiresAccessibilityAccess: true,
             isEnabled: true
+        ),
+        FeatureDescriptor(
+            id: "text-expander",
+            title: "Text Expander",
+            summary: "Type a shortcut followed by a space to instantly expand it to the full text in any app.",
+            requiresAccessibilityAccess: true,
+            isEnabled: true
         )
     ]
+
+    @Published var textExpanderEntries: [TextExpanderEntry] {
+        didSet {
+            let safeEntries = Self.sanitizedEntries(textExpanderEntries)
+            if textExpanderEntries != safeEntries {
+                textExpanderEntries = safeEntries
+                return
+            }
+
+            if let encoded = try? JSONEncoder().encode(safeEntries) {
+                UserDefaults.standard.set(encoded, forKey: Self.textExpanderEntriesKey)
+            }
+
+            (liveFeatures["text-expander"] as? TextExpanderFeature)?.entries = safeEntries
+        }
+    }
 
     @Published var writingFixRules: [WritingFixRule] {
         didSet {
@@ -53,6 +76,7 @@ final class AppBootstrapper: ObservableObject {
 
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
+    private static let textExpanderEntriesKey = "textExpanderEntries"
     private static let dockHoverPopupDelayKey = "dockHoverPopupDelay"
     private static let defaultDockHoverPopupDelay = 0.25
     private static let writingFixRulesKey = "writingFixRules"
@@ -67,6 +91,7 @@ final class AppBootstrapper: ObservableObject {
     init() {
         let savedDelay = UserDefaults.standard.object(forKey: Self.dockHoverPopupDelayKey) as? Double
         dockHoverPopupDelay = savedDelay ?? Self.defaultDockHoverPopupDelay
+        textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
@@ -118,12 +143,16 @@ final class AppBootstrapper: ObservableObject {
             feature.popupDelay = max(0, dockHoverPopupDelay)
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
+            ensureFeatureExists(TextExpanderFeature())
         } else {
             if let feature = liveFeatures.removeValue(forKey: "dock-window-hover") {
                 feature.stop()
             }
             if let writingFixFeature = liveFeatures.removeValue(forKey: "writing-fix") {
                 writingFixFeature.stop()
+            }
+            if let textExpanderFeature = liveFeatures.removeValue(forKey: "text-expander") {
+                textExpanderFeature.stop()
             }
         }
 
@@ -145,13 +174,39 @@ final class AppBootstrapper: ObservableObject {
             if let writingFixFeature = liveFeatures[feature.id] as? WritingFixFeature {
                 writingFixFeature.rules = writingFixRules
             }
+            if let textExpanderFeature = liveFeatures[feature.id] as? TextExpanderFeature {
+                textExpanderFeature.entries = textExpanderEntries
+            }
             return
         }
 
         if let writingFixFeature = feature as? WritingFixFeature {
             writingFixFeature.rules = writingFixRules
         }
+        if let textExpanderFeature = feature as? TextExpanderFeature {
+            textExpanderFeature.entries = textExpanderEntries
+        }
         liveFeatures[feature.id] = feature
+    }
+
+    private static func loadTextExpanderEntries() -> [TextExpanderEntry] {
+        if let data = UserDefaults.standard.data(forKey: textExpanderEntriesKey),
+           let decoded = try? JSONDecoder().decode([TextExpanderEntry].self, from: data) {
+            return sanitizedEntries(decoded)
+        }
+        return [TextExpanderEntry(shortcut: "hlo", expansion: "hello")]
+    }
+
+    private static func sanitizedEntries(_ entries: [TextExpanderEntry]) -> [TextExpanderEntry] {
+        var seen: Set<String> = []
+        return entries.compactMap { entry in
+            let shortcut = entry.shortcut.trimmingCharacters(in: .whitespacesAndNewlines)
+            let expansion = entry.expansion.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !shortcut.isEmpty, !expansion.isEmpty else { return nil }
+            guard !seen.contains(shortcut) else { return nil }
+            seen.insert(shortcut)
+            return TextExpanderEntry(id: entry.id, shortcut: shortcut, expansion: expansion)
+        }
     }
 
     private static func loadWritingFixRules() -> [WritingFixRule] {
