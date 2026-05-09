@@ -11,7 +11,7 @@ struct SystemHealthSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "System Health",
-            subtitle: "Shows a small menu bar dot that turns amber when CPU, memory, disk, or battery needs attention."
+            subtitle: "Shows a small menu bar dot that follows memory usage health."
         ) {
             featureToggle
         } content: {
@@ -20,7 +20,7 @@ struct SystemHealthSettingsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         SettingsRow(
                             "Menu bar indicator",
-                            description: "A green dot means system usage is within normal limits. Amber means at least one metric needs attention."
+                            description: "A green dot means memory usage is within normal limits. Amber and red reflect higher memory pressure."
                         ) {
                             HStack(spacing: 8) {
                                 Circle()
@@ -39,7 +39,7 @@ struct SystemHealthSettingsView: View {
 
                         SettingsRow(
                             "Popup metrics",
-                            description: "Click the dot to see CPU usage, memory usage, memory pressure, disk usage, battery level, and swap usage."
+                            description: "Click the dot to see circular percentage rings for CPU, memory, disk, and battery, plus swap usage."
                         ) {
                             Image(systemName: "chart.bar.xaxis")
                                 .font(.system(size: 12, weight: .medium))

@@ -11,14 +11,12 @@ final class SystemHealthMonitor {
     }
 
     func snapshot() -> SystemHealthSnapshot {
-        let memory = memoryMetrics()
         let swap = swapMetrics()
         let battery = batteryMetrics()
 
         return SystemHealthSnapshot(
             cpuUsage: cpuUsage(),
-            memoryUsage: memory.usage,
-            memoryPressure: memory.pressure,
+            memoryUsage: memoryUsage(),
             diskUsage: diskUsage(),
             batteryLevel: battery.level,
             batteryIsCharging: battery.isCharging,
@@ -68,7 +66,7 @@ final class SystemHealthMonitor {
         return min(100, max(0, (totalUsage / Double(processorCount)) * 100))
     }
 
-    private func memoryMetrics() -> (usage: Double, pressure: Double) {
+    private func memoryUsage() -> Double {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
 
@@ -78,25 +76,17 @@ final class SystemHealthMonitor {
             }
         }
 
-        guard result == KERN_SUCCESS else { return (0, 0) }
+        guard result == KERN_SUCCESS else { return 0 }
+        guard let totalMemory = sysctlUInt64("hw.memsize"), totalMemory > 0 else { return 0 }
 
         let pageSize = UInt64(vm_kernel_page_size)
         let active = UInt64(stats.active_count) * pageSize
-        let inactive = UInt64(stats.inactive_count) * pageSize
-        let speculative = UInt64(stats.speculative_count) * pageSize
         let wired = UInt64(stats.wire_count) * pageSize
         let compressed = UInt64(stats.compressor_page_count) * pageSize
-        let free = UInt64(stats.free_count) * pageSize
-        let purgeable = UInt64(stats.purgeable_count) * pageSize
         let appUsed = active + wired + compressed
-        let reclaimable = inactive + speculative + purgeable + free
-        let total = appUsed + reclaimable
 
-        guard total > 0 else { return (0, 0) }
-
-        let usage = Double(appUsed) / Double(total) * 100
-        let pressure = Double(active + wired + compressed) / Double(total) * 100
-        return (min(100, max(0, usage)), min(100, max(0, pressure)))
+        let usage = Double(min(appUsed, totalMemory)) / Double(totalMemory) * 100
+        return clampedPercentage(usage)
     }
 
     private func diskUsage() -> Double {
@@ -140,6 +130,19 @@ final class SystemHealthMonitor {
 
         guard result == 0 else { return (0, 0) }
         return (usage.xsu_used, usage.xsu_total)
+    }
+
+    private func sysctlUInt64(_ name: String) -> UInt64? {
+        var value: UInt64 = 0
+        var size = MemoryLayout<UInt64>.stride
+        let result = sysctlbyname(name, &value, &size, nil, 0)
+
+        guard result == 0 else { return nil }
+        return value
+    }
+
+    private func clampedPercentage(_ value: Double) -> Double {
+        min(100, max(0, value))
     }
 
     private func deallocatePreviousCPUInfo() {
