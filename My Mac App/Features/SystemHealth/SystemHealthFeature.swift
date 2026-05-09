@@ -110,7 +110,9 @@ final class SystemHealthFeature: NSObject, AppFeature {
         closePanel()
 
         let panelWidth: CGFloat = 430
-        let panelHeight: CGFloat = 310
+
+        let hostingController = NSHostingController(rootView: SystemHealthPopoverView(model: model))
+        let panelHeight = ceil(hostingController.sizeThatFits(in: NSSize(width: panelWidth, height: .greatestFiniteMagnitude)).height)
 
         let newPanel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
@@ -123,15 +125,18 @@ final class SystemHealthFeature: NSObject, AppFeature {
         newPanel.hasShadow = true
         newPanel.level = .popUpMenu
         newPanel.isReleasedWhenClosed = false
-        newPanel.contentViewController = NSHostingController(
-            rootView: SystemHealthPopoverView(model: model)
-        )
+        newPanel.contentViewController = hostingController
 
         if let screen = NSScreen.main {
             let sf = screen.visibleFrame
             let x = sf.maxX - panelWidth
-            let y = sf.maxY - panelHeight - 30
-            newPanel.setFrameOrigin(NSPoint(x: x, y: y))
+            if let button = statusItem?.button, let buttonWindow = button.window {
+                let buttonRectInScreen = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+                let y = buttonRectInScreen.minY - panelHeight - 6
+                newPanel.setFrameOrigin(NSPoint(x: x, y: y))
+            } else {
+                newPanel.setFrameOrigin(NSPoint(x: x, y: sf.maxY - panelHeight))
+            }
         } else {
             newPanel.center()
         }

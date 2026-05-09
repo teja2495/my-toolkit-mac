@@ -48,37 +48,43 @@ struct SystemHealthPopoverView: View {
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
 
-            Button(role: .destructive) {
-                quitAllRegularApps()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "xmark.circle")
-                    Text("Quit All Apps")
+            HStack(spacing: 10) {
+                Button(role: .destructive) {
+                    quitAllRegularApps()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle")
+                        Text("Quit All Apps")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
-            .buttonStyle(.bordered)
+                .buttonStyle(.bordered)
 
-            Button {
-                NSWorkspace.shared.launchApplication("Activity Monitor")
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "gauge.with.dots.needle.50percent")
-                    Text("Open Activity Monitor")
+                Button {
+                    NSWorkspace.shared.launchApplication("Activity Monitor")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gauge.with.dots.needle.50percent")
+                        Text("Open Activity Monitor")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
                 }
-                .font(.system(size: 12, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding(20)
         .frame(width: 430)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
