@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 final class SystemHealthFeature: NSObject, AppFeature, NSPopoverDelegate {
     let id = "system-health"
-    private let popoverVerticalOffset: CGFloat = 22
+    private let popoverVerticalOffset: CGFloat = 36
 
     private let monitor = SystemHealthMonitor()
     private let model = SystemHealthModel()
