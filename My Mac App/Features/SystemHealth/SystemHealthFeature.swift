@@ -116,7 +116,7 @@ final class SystemHealthFeature: NSObject, AppFeature {
 
         let newPanel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -124,6 +124,7 @@ final class SystemHealthFeature: NSObject, AppFeature {
         newPanel.backgroundColor = .clear
         newPanel.hasShadow = true
         newPanel.level = .popUpMenu
+        newPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         newPanel.isReleasedWhenClosed = false
         newPanel.contentViewController = hostingController
 
@@ -144,8 +145,8 @@ final class SystemHealthFeature: NSObject, AppFeature {
         self.panel = newPanel
         installPanelResignObserver(for: newPanel)
 
-        NSApp.activate(ignoringOtherApps: true)
-        newPanel.makeKeyAndOrderFront(nil)
+        newPanel.orderFrontRegardless()
+        newPanel.makeKey()
     }
 
     private func closePanel() {
