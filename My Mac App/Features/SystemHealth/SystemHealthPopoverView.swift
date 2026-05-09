@@ -201,10 +201,12 @@ struct SystemHealthPopoverView: View {
 
     private func quitAllRegularApps() {
         let currentBundleIdentifier = Bundle.main.bundleIdentifier
+        let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
         NSWorkspace.shared.runningApplications
             .filter { app in
                 app.activationPolicy == .regular &&
                 !app.isTerminated &&
+                app.processIdentifier != currentProcessIdentifier &&
                 app.bundleIdentifier != currentBundleIdentifier
             }
             .forEach { $0.terminate() }
