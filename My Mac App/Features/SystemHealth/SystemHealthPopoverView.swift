@@ -14,16 +14,9 @@ struct SystemHealthPopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 10, height: 10)
-
-                Text("System Health")
-                    .font(.system(size: 15, weight: .semibold))
-
-                Spacer(minLength: 0)
-            }
+            Text("System Health")
+                .font(.system(size: 15, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .center)
 
             HStack(spacing: 18) {
                 ringMetric(title: "CPU", value: snapshot.cpuUsage, tone: toneForCPU(snapshot.cpuUsage))
@@ -83,17 +76,6 @@ struct SystemHealthPopoverView: View {
         }
         .padding(14)
         .frame(width: 430)
-    }
-
-    private var dotColor: Color {
-        switch snapshot.menuBarStatus {
-        case .good:
-            return Self.green
-        case .attention:
-            return Self.amber
-        case .critical:
-            return Self.subtleRed
-        }
     }
 
     private var swapProgress: Double {

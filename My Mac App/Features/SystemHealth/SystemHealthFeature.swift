@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class SystemHealthFeature: NSObject, AppFeature, NSPopoverDelegate {
     let id = "system-health"
+    private let popoverVerticalOffset: CGFloat = 22
 
     private let monitor = SystemHealthMonitor()
     private let model = SystemHealthModel()
@@ -74,17 +75,21 @@ final class SystemHealthFeature: NSObject, AppFeature, NSPopoverDelegate {
     private func makeStatusDotImage(color: NSColor) -> NSImage {
         let canvasSize = NSSize(width: 18, height: 18)
         let dotDiameter: CGFloat = 10
-        let image = NSImage(size: canvasSize)
-        image.lockFocus()
-        color.setFill()
         let dotRect = NSRect(
             x: (canvasSize.width - dotDiameter) / 2,
             y: (canvasSize.height - dotDiameter) / 2,
             width: dotDiameter,
             height: dotDiameter
         )
-        NSBezierPath(ovalIn: dotRect).fill()
-        image.unlockFocus()
+
+        let image = NSImage(size: canvasSize, flipped: false) { _ in
+            NSColor.clear.setFill()
+            NSBezierPath(rect: NSRect(origin: .zero, size: canvasSize)).fill()
+
+            color.setFill()
+            NSBezierPath(ovalIn: dotRect).fill()
+            return true
+        }
         image.isTemplate = false
         return image
     }
@@ -117,6 +122,9 @@ final class SystemHealthFeature: NSObject, AppFeature, NSPopoverDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard let window = self.popover?.contentViewController?.view.window else { return }
+
+            let frame = window.frame
+            window.setFrameOrigin(NSPoint(x: frame.origin.x, y: frame.origin.y - self.popoverVerticalOffset))
 
             self.popoverWindow = window
             self.installPopoverResignObserver(for: window)
