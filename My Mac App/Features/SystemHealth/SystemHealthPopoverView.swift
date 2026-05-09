@@ -74,8 +74,13 @@ struct SystemHealthPopoverView: View {
             }
             .buttonStyle(.borderedProminent)
         }
-        .padding(14)
+        .padding(20)
         .frame(width: 430)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var swapProgress: Double {
