@@ -48,6 +48,7 @@ struct SystemHealthPopoverView: View {
                     title: "Top CPU",
                     columnLabel: "CPU",
                     processes: snapshot.topCPUProcesses,
+                    isLoading: model.isLoadingProcessData,
                     value: { SystemHealthFormatter.percentage($0.cpuUsage) },
                     tone: { toneForProcessCPU($0.cpuUsage) }
                 )
@@ -59,6 +60,7 @@ struct SystemHealthPopoverView: View {
                     title: "Top Memory",
                     columnLabel: "Memory",
                     processes: snapshot.topMemoryProcesses,
+                    isLoading: model.isLoadingProcessData,
                     value: { SystemHealthFormatter.processMemory($0.memoryBytes) },
                     tone: { toneForProcessMemory($0.memoryUsage) }
                 )
@@ -189,6 +191,7 @@ struct SystemHealthPopoverView: View {
         title: String,
         columnLabel: String,
         processes: [SystemHealthProcess],
+        isLoading: Bool,
         value: @escaping (SystemHealthProcess) -> String,
         tone: @escaping (SystemHealthProcess) -> Color
     ) -> some View {
@@ -204,7 +207,12 @@ struct SystemHealthPopoverView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            if processes.isEmpty {
+            if isLoading {
+                Text("Loading process data...")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(height: 24)
+            } else if processes.isEmpty {
                 Text("No process data")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

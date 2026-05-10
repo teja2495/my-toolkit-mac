@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import IOKit.ps
 import SwiftUI
 
 private final class KeyablePanel: NSPanel {
@@ -7,16 +8,29 @@ private final class KeyablePanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
+private final class SystemHealthSnapshotReader {
+    private let monitor = SystemHealthMonitor()
+    private let queue = DispatchQueue(label: "com.tk.my-mac-app.system-health.snapshot", qos: .utility)
+
+    func snapshot(includeProcesses: Bool, completion: @escaping (SystemHealthSnapshot) -> Void) {
+        queue.async { [monitor] in
+            completion(monitor.snapshot(includeProcesses: includeProcesses))
+        }
+    }
+}
+
 @MainActor
 final class SystemHealthFeature: NSObject, AppFeature {
     let id = "system-health"
 
-    private let monitor = SystemHealthMonitor()
+    private let snapshotReader = SystemHealthSnapshotReader()
     private let model = SystemHealthModel()
     private var statusItem: NSStatusItem?
     private var panel: KeyablePanel?
     private var panelResignObserver: NSObjectProtocol?
     private var refreshTimer: Timer?
+    private var powerSourceRunLoopSource: CFRunLoopSource?
+    private var latestSnapshot: SystemHealthSnapshot = .empty
 
     func start() {
         guard statusItem == nil else { return }
@@ -39,11 +53,14 @@ final class SystemHealthFeature: NSObject, AppFeature {
         if let refreshTimer {
             RunLoop.main.add(refreshTimer, forMode: .common)
         }
+
+        startPowerSourceMonitoring()
     }
 
     func stop() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        stopPowerSourceMonitoring()
         closePanel()
 
         if let statusItem {
@@ -52,15 +69,64 @@ final class SystemHealthFeature: NSObject, AppFeature {
         statusItem = nil
     }
 
-    private func refreshSnapshot(publishToPopover: Bool) {
-        let snapshot = monitor.snapshot(includeProcesses: publishToPopover)
-        updateStatusDotDeferred(for: snapshot.memoryStatus)
+    private func startPowerSourceMonitoring() {
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        guard let sourceUnmanaged = IOPSNotificationCreateRunLoopSource(
+            { rawContext in
+                guard let rawContext else { return }
+                let feature = Unmanaged<SystemHealthFeature>.fromOpaque(rawContext).takeUnretainedValue()
+                Task { @MainActor in
+                    feature.refreshBatteryNow()
+                }
+            },
+            context
+        ) else { return }
+        let source = sourceUnmanaged.takeRetainedValue()
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+        powerSourceRunLoopSource = source
+    }
 
-        guard publishToPopover else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, panel?.isVisible == true else { return }
-            model.snapshot = snapshot
+    private func stopPowerSourceMonitoring() {
+        if let source = powerSourceRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode)
+            powerSourceRunLoopSource = nil
         }
+    }
+
+    private func refreshBatteryNow() {
+        snapshotReader.snapshot(includeProcesses: false) { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.latestSnapshot = self.snapshotPreservingProcessDataIfNeeded(snapshot)
+                self.updateStatusDot(for: snapshot.memoryStatus)
+                guard self.panel?.isVisible == true else { return }
+                self.model.snapshot = self.latestSnapshot
+            }
+        }
+    }
+
+    private func refreshSnapshot(publishToPopover: Bool) {
+        snapshotReader.snapshot(includeProcesses: publishToPopover) { [weak self] snapshot in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.latestSnapshot = self.snapshotPreservingProcessDataIfNeeded(snapshot)
+                self.updateStatusDot(for: snapshot.memoryStatus)
+
+                guard publishToPopover, self.panel?.isVisible == true else { return }
+                self.model.snapshot = self.latestSnapshot
+                self.model.isLoadingProcessData = false
+            }
+        }
+    }
+
+    private func snapshotPreservingProcessDataIfNeeded(_ snapshot: SystemHealthSnapshot) -> SystemHealthSnapshot {
+        guard snapshot.topCPUProcesses.isEmpty, snapshot.topMemoryProcesses.isEmpty else { return snapshot }
+        guard !latestSnapshot.topCPUProcesses.isEmpty || !latestSnapshot.topMemoryProcesses.isEmpty else { return snapshot }
+
+        var mergedSnapshot = snapshot
+        mergedSnapshot.topCPUProcesses = latestSnapshot.topCPUProcesses
+        mergedSnapshot.topMemoryProcesses = latestSnapshot.topMemoryProcesses
+        return mergedSnapshot
     }
 
     private func updateStatusDot(for status: SystemHealthStatus) {
@@ -78,12 +144,6 @@ final class SystemHealthFeature: NSObject, AppFeature {
         button.attributedTitle = NSAttributedString(string: "")
         button.image = makeStatusDotImage(color: color)
         button.imagePosition = .imageOnly
-    }
-
-    private func updateStatusDotDeferred(for status: SystemHealthStatus) {
-        DispatchQueue.main.async { [weak self] in
-            self?.updateStatusDot(for: status)
-        }
     }
 
     private func makeStatusDotImage(color: NSColor) -> NSImage {
@@ -115,9 +175,10 @@ final class SystemHealthFeature: NSObject, AppFeature {
             return
         }
 
-        model.snapshot = monitor.snapshot(includeProcesses: true)
-        updateStatusDot(for: model.snapshot.memoryStatus)
+        model.snapshot = latestSnapshot
+        model.isLoadingProcessData = true
         showPanel()
+        refreshSnapshot(publishToPopover: true)
     }
 
     private func showPanel() {
@@ -167,6 +228,7 @@ final class SystemHealthFeature: NSObject, AppFeature {
         removePanelResignObserver()
         panel?.orderOut(nil)
         panel = nil
+        model.isLoadingProcessData = false
     }
 
     private func installPanelResignObserver(for window: NSWindow) {
@@ -193,4 +255,5 @@ final class SystemHealthFeature: NSObject, AppFeature {
 @MainActor
 final class SystemHealthModel: ObservableObject {
     @Published var snapshot: SystemHealthSnapshot = .empty
+    @Published var isLoadingProcessData = false
 }

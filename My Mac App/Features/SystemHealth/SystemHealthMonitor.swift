@@ -163,12 +163,13 @@ final class SystemHealthMonitor {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return []
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return [] }
         guard let output = String(data: data, encoding: .utf8) else { return [] }
 
         return output
