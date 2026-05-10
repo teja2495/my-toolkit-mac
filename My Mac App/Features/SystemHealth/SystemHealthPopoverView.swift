@@ -37,12 +37,14 @@ struct SystemHealthPopoverView: View {
             }
 
             VStack(spacing: 10) {
-                metricBarRow(
-                    "Swap usage",
-                    value: SystemHealthFormatter.swap(snapshot.swapUsed, total: snapshot.swapTotal),
-                    progress: swapProgress,
-                    tone: toneForSwap(swapProgress * 100)
-                )
+                if snapshot.swapTotal > 0 {
+                    metricBarRow(
+                        "Swap usage",
+                        value: SystemHealthFormatter.swap(snapshot.swapUsed, total: snapshot.swapTotal),
+                        progress: swapProgress,
+                        tone: toneForSwap(swapProgress * 100)
+                    )
+                }
 
                 processSection(
                     title: "Top CPU",
