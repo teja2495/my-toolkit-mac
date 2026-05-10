@@ -11,16 +11,15 @@ final class DockHoverDetector {
         guard let dockAXElement = dockElement() else { return nil }
 
         // NSEvent.mouseLocation uses Cocoa coordinates (bottom-left origin).
-        // AXUIElementCopyElementAtPosition expects top-left origin in the
-        // primary screen's coordinate space.
-        guard let primaryScreen = NSScreen.screens.first else { return nil }
-        let flippedY = primaryScreen.frame.height - mouseLocation.y
+        // AXUIElementCopyElementAtPosition expects top-left coordinates in the
+        // display space containing the cursor.
+        let accessibilityPoint = accessibilityPoint(from: mouseLocation)
 
         var elementReference: AXUIElement?
         let result = AXUIElementCopyElementAtPosition(
             dockAXElement,
-            Float(mouseLocation.x),
-            Float(flippedY),
+            Float(accessibilityPoint.x),
+            Float(accessibilityPoint.y),
             &elementReference
         )
 
@@ -119,14 +118,45 @@ final class DockHoverDetector {
 
         guard
             AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
-            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size),
-            let primaryScreen = NSScreen.screens.first
+            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
         else { return nil }
 
-        // AX returns top-left origin in primary screen space; convert to Cocoa
-        // (bottom-left) so the value is directly usable for NSPanel placement.
-        let cocoaY = primaryScreen.frame.height - position.y - size.height
-        return CGRect(x: position.x, y: cocoaY, width: size.width, height: size.height)
+        // AX returns top-left origin; convert against the screen containing
+        // that AX rect so NSPanel placement works across display arrangements.
+        return cocoaFrame(fromAccessibilityPosition: position, size: size)
+    }
+
+    private func accessibilityPoint(from cocoaPoint: CGPoint) -> CGPoint {
+        let screen = NSScreen.screens.first { $0.frame.contains(cocoaPoint) }
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+
+        guard let screen else { return cocoaPoint }
+        return CGPoint(x: cocoaPoint.x, y: screen.frame.maxY - cocoaPoint.y)
+    }
+
+    private func cocoaFrame(fromAccessibilityPosition position: CGPoint, size: CGSize) -> CGRect {
+        for screen in NSScreen.screens {
+            let candidate = CGRect(
+                x: position.x,
+                y: screen.frame.maxY - position.y - size.height,
+                width: size.width,
+                height: size.height
+            )
+
+            if screen.frame.intersects(candidate) {
+                return candidate
+            }
+        }
+
+        let fallbackScreen = NSScreen.main ?? NSScreen.screens.first
+        let fallbackMaxY = fallbackScreen?.frame.maxY ?? 0
+        return CGRect(
+            x: position.x,
+            y: fallbackMaxY - position.y - size.height,
+            width: size.width,
+            height: size.height
+        )
     }
 
     private func parentElement(of element: AXUIElement) -> AXUIElement? {

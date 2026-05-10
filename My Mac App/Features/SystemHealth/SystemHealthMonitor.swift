@@ -10,9 +10,10 @@ final class SystemHealthMonitor {
         deallocatePreviousCPUInfo()
     }
 
-    func snapshot() -> SystemHealthSnapshot {
+    func snapshot(includeProcesses: Bool = false) -> SystemHealthSnapshot {
         let swap = swapMetrics()
         let battery = batteryMetrics()
+        let processes = includeProcesses ? processMetrics() : []
 
         return SystemHealthSnapshot(
             cpuUsage: cpuUsage(),
@@ -22,6 +23,8 @@ final class SystemHealthMonitor {
             batteryIsCharging: battery.isCharging,
             swapUsed: swap.used,
             swapTotal: swap.total,
+            topCPUProcesses: Array(processes.sorted { $0.cpuUsage > $1.cpuUsage }.prefix(3)),
+            topMemoryProcesses: Array(processes.sorted { $0.memoryUsage > $1.memoryUsage }.prefix(3)),
             capturedAt: Date()
         )
     }
@@ -130,6 +133,50 @@ final class SystemHealthMonitor {
 
         guard result == 0 else { return (0, 0) }
         return (usage.xsu_used, usage.xsu_total)
+    }
+
+    private func processMetrics() -> [SystemHealthProcess] {
+        let process = Process()
+        let pipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-axo", "pid=,pcpu=,pmem=,rss=,comm="]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return []
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else { return [] }
+
+        return output
+            .split(separator: "\n")
+            .compactMap { line in
+                let parts = line.trimmingCharacters(in: .whitespaces).split(maxSplits: 4, whereSeparator: \.isWhitespace)
+                guard parts.count == 5,
+                      let processIdentifier = Int32(parts[0]),
+                      let cpuUsage = Double(parts[1]),
+                      let memoryUsage = Double(parts[2]),
+                      let rssKB = UInt64(parts[3])
+                else {
+                    return nil
+                }
+
+                let name = URL(fileURLWithPath: String(parts[4])).lastPathComponent
+                guard processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+                return SystemHealthProcess(
+                    processIdentifier: processIdentifier,
+                    name: name.isEmpty ? String(parts[4]) : name,
+                    cpuUsage: clampedPercentage(cpuUsage),
+                    memoryUsage: clampedPercentage(memoryUsage),
+                    memoryBytes: rssKB * 1024
+                )
+            }
     }
 
     private func sysctlUInt64(_ name: String) -> UInt64? {

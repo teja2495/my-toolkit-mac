@@ -8,6 +8,8 @@ struct SystemHealthSnapshot: Equatable {
     var batteryIsCharging: Bool?
     var swapUsed: UInt64
     var swapTotal: UInt64
+    var topCPUProcesses: [SystemHealthProcess]
+    var topMemoryProcesses: [SystemHealthProcess]
     var capturedAt: Date
 
     var menuBarStatus: SystemHealthStatus {
@@ -51,8 +53,19 @@ struct SystemHealthSnapshot: Equatable {
         batteryIsCharging: nil,
         swapUsed: 0,
         swapTotal: 0,
+        topCPUProcesses: [],
+        topMemoryProcesses: [],
         capturedAt: .distantPast
     )
+}
+
+struct SystemHealthProcess: Equatable, Identifiable {
+    var id: Int32 { processIdentifier }
+    var processIdentifier: Int32
+    var name: String
+    var cpuUsage: Double
+    var memoryUsage: Double
+    var memoryBytes: UInt64
 }
 
 enum SystemHealthStatus: Int, Comparable {
@@ -68,6 +81,14 @@ enum SystemHealthStatus: Int, Comparable {
 struct SystemHealthFormatter {
     static func percentage(_ value: Double) -> String {
         "\(Int(value.rounded()))%"
+    }
+
+    static func processMemory(_ bytes: UInt64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        if mb >= 1024 {
+            return String(format: "%.1f GB", mb / 1024)
+        }
+        return String(format: "%.0f MB", mb)
     }
 
     static func bytes(_ value: UInt64) -> String {

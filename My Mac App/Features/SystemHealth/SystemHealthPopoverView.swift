@@ -37,6 +37,25 @@ struct SystemHealthPopoverView: View {
                     progress: swapProgress,
                     tone: toneForSwap(swapProgress * 100)
                 )
+
+                processSection(
+                    title: "Top CPU",
+                    columnLabel: "CPU",
+                    processes: snapshot.topCPUProcesses,
+                    value: { SystemHealthFormatter.percentage($0.cpuUsage) },
+                    tone: { toneForProcessCPU($0.cpuUsage) }
+                )
+
+                Divider()
+                    .padding(.vertical, 2)
+
+                processSection(
+                    title: "Top Memory",
+                    columnLabel: "Memory",
+                    processes: snapshot.topMemoryProcesses,
+                    value: { SystemHealthFormatter.processMemory($0.memoryBytes) },
+                    tone: { toneForProcessMemory($0.memoryUsage) }
+                )
             }
             .padding(12)
             .background(
@@ -133,6 +152,76 @@ struct SystemHealthPopoverView: View {
         .frame(height: 28)
     }
 
+    private func processSection(
+        title: String,
+        columnLabel: String,
+        processes: [SystemHealthProcess],
+        value: @escaping (SystemHealthProcess) -> String,
+        tone: @escaping (SystemHealthProcess) -> Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.6)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(columnLabel)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if processes.isEmpty {
+                Text("No process data")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(height: 24)
+            } else {
+                VStack(spacing: 3) {
+                    ForEach(processes) { process in
+                        processRow(process, value: value(process), tone: tone(process))
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func processRow(_ process: SystemHealthProcess, value: String, tone: Color) -> some View {
+        HStack(spacing: 9) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(tone)
+                .frame(width: 3, height: 20)
+
+            Text(process.name)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 8)
+
+            Text(value)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tone)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(tone.opacity(0.13))
+                )
+
+            Button(role: .destructive) {
+                quitProcess(process.processIdentifier)
+            } label: {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("Quit \(process.name)")
+        }
+        .frame(height: 28)
+    }
+
     private func ringMetric(title: String, value: Double, tone: Color, isAvailable: Bool = true) -> some View {
         let clamped = min(max(value, 0), 100)
         return VStack(spacing: 7) {
@@ -192,6 +281,18 @@ struct SystemHealthPopoverView: View {
         return Self.green
     }
 
+    private func toneForProcessCPU(_ value: Double) -> Color {
+        if value > 50 { return Self.subtleRed }
+        if value >= 20 { return Self.amber }
+        return Self.green
+    }
+
+    private func toneForProcessMemory(_ value: Double) -> Color {
+        if value > 10 { return Self.subtleRed }
+        if value >= 5 { return Self.amber }
+        return Self.green
+    }
+
     private func quitAllRegularApps() {
         let currentBundleIdentifier = Bundle.main.bundleIdentifier
         let currentProcessIdentifier = ProcessInfo.processInfo.processIdentifier
@@ -203,5 +304,14 @@ struct SystemHealthPopoverView: View {
                 app.bundleIdentifier != currentBundleIdentifier
             }
             .forEach { $0.terminate() }
+    }
+
+    private func quitProcess(_ processIdentifier: Int32) {
+        if let app = NSRunningApplication(processIdentifier: pid_t(processIdentifier)) {
+            app.terminate()
+            return
+        }
+
+        kill(pid_t(processIdentifier), SIGTERM)
     }
 }

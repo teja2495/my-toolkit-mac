@@ -27,10 +27,12 @@ final class SystemHealthFeature: NSObject, AppFeature {
         item.button?.toolTip = "System Health"
         statusItem = item
 
-        refreshSnapshot()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.refreshSnapshot(publishToPopover: false)
+        }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             Task { @MainActor [weak self] in
-                self?.refreshSnapshot()
+                self?.refreshSnapshot(publishToPopover: self?.panel?.isVisible == true)
             }
         }
 
@@ -50,10 +52,15 @@ final class SystemHealthFeature: NSObject, AppFeature {
         statusItem = nil
     }
 
-    private func refreshSnapshot() {
-        let snapshot = monitor.snapshot()
-        model.snapshot = snapshot
-        updateStatusDot(for: snapshot.memoryStatus)
+    private func refreshSnapshot(publishToPopover: Bool) {
+        let snapshot = monitor.snapshot(includeProcesses: publishToPopover)
+        updateStatusDotDeferred(for: snapshot.memoryStatus)
+
+        guard publishToPopover else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, panel?.isVisible == true else { return }
+            model.snapshot = snapshot
+        }
     }
 
     private func updateStatusDot(for status: SystemHealthStatus) {
@@ -71,6 +78,12 @@ final class SystemHealthFeature: NSObject, AppFeature {
         button.attributedTitle = NSAttributedString(string: "")
         button.image = makeStatusDotImage(color: color)
         button.imagePosition = .imageOnly
+    }
+
+    private func updateStatusDotDeferred(for status: SystemHealthStatus) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateStatusDot(for: status)
+        }
     }
 
     private func makeStatusDotImage(color: NSColor) -> NSImage {
@@ -102,7 +115,8 @@ final class SystemHealthFeature: NSObject, AppFeature {
             return
         }
 
-        refreshSnapshot()
+        model.snapshot = monitor.snapshot(includeProcesses: true)
+        updateStatusDot(for: model.snapshot.memoryStatus)
         showPanel()
     }
 
