@@ -17,6 +17,7 @@ struct SystemHealthPopoverView: View {
             Text("System Health")
                 .font(.system(size: 15, weight: .semibold))
                 .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, -6)
 
             HStack(spacing: 18) {
                 ringMetric(title: "CPU", value: snapshot.cpuUsage, tone: toneForCPU(snapshot.cpuUsage))
@@ -128,7 +129,7 @@ struct SystemHealthPopoverView: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if let watts = snapshot.batteryChargingWatts {
-                Text("\(Int(watts)) W")
+                Text("\(Int(watts)) Watt")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Self.green)
             }
