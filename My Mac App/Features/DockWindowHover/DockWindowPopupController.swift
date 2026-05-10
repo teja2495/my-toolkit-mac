@@ -9,6 +9,7 @@ final class DockWindowPopupController {
     private let windowProvider = AppWindowTitleProvider()
     private var hostingController: NSHostingController<AnyView>
     private var latestFocusRequestID: UInt64 = 0
+    private var initialWindowCount: Int = 0
 
     init() {
         hostingController = NSHostingController(rootView: AnyView(EmptyView()))
@@ -37,8 +38,10 @@ final class DockWindowPopupController {
         windows: [WindowInfo],
         vscodeFolderShortcuts: [VSCodeFolderShortcut]
     ) {
-        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
-        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
+        initialWindowCount = windows.count
+        let hideWindowsList = initialWindowCount == 1
+        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
+        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
         panel.orderFrontRegardless()
     }
@@ -48,8 +51,9 @@ final class DockWindowPopupController {
         windows: [WindowInfo],
         vscodeFolderShortcuts: [VSCodeFolderShortcut]
     ) {
-        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
-        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts)
+        let hideWindowsList = initialWindowCount == 1
+        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
+        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
     }
 
@@ -60,7 +64,8 @@ final class DockWindowPopupController {
     private func setView(
         for app: DockHoveredApplication,
         windows: [WindowInfo],
-        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+        vscodeFolderShortcuts: [VSCodeFolderShortcut],
+        hideWindowsList: Bool
     ) {
         let icon = NSRunningApplication(processIdentifier: app.processIdentifier)?.icon
         let isAppFocused = NSRunningApplication(processIdentifier: app.processIdentifier)?.isActive ?? false
@@ -76,8 +81,9 @@ final class DockWindowPopupController {
                 isVSCodeApp: isVSCodeApp,
                 showNewWindowButton: showNewWindowButton,
                 isAppFocused: isAppFocused,
+                hideWindowsList: hideWindowsList,
                 onHide: { [weak self] in
-                    self?.hideApplication(processIdentifier: app.processIdentifier)
+                    self?.closeAllWindows(processIdentifier: app.processIdentifier)
                 },
                 onQuit: { [weak self] in
                     self?.quitApplication(processIdentifier: app.processIdentifier)
@@ -106,6 +112,24 @@ final class DockWindowPopupController {
                 }
             )
         )
+    }
+
+    private func closeAllWindows(processIdentifier: pid_t) {
+        let axApp = AXUIElementCreateApplication(processIdentifier)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &ref) == .success,
+              let axWindows = ref as? [AXUIElement] else {
+            hide()
+            return
+        }
+        for axWindow in axWindows {
+            var closeRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &closeRef) == .success,
+               let closeButton = closeRef {
+                AXUIElementPerformAction(closeButton as! AXUIElement, kAXPressAction as CFString)
+            }
+        }
+        hide()
     }
 
     private func focusWindow(_ windowInfo: WindowInfo, foregroundProcessIdentifier: pid_t) {
@@ -293,20 +317,23 @@ final class DockWindowPopupController {
     private func preferredSize(
         for app: DockHoveredApplication,
         windows: [WindowInfo],
-        vscodeFolderShortcuts: [VSCodeFolderShortcut]
+        vscodeFolderShortcuts: [VSCodeFolderShortcut],
+        hideWindowsList: Bool
     ) -> CGSize {
         let rowCount: Int
         if isVSCodeBundle(app.bundleIdentifier) {
             rowCount = vscodeFolderShortcuts.count
         } else {
             let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
-            rowCount = Array(windows.prefix(8)).count + newWindowRow
+            rowCount = hideWindowsList ? newWindowRow : Array(windows.prefix(8)).count + newWindowRow
         }
         let width = 340.0
 
         // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
-        height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(max(0, rowCount - 1)) * 6.0
+        if rowCount > 0 {
+            height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
+        }
         return CGSize(width: width, height: height)
     }
 
@@ -417,6 +444,7 @@ private struct DockWindowPopupView: View {
     let isVSCodeApp: Bool
     let showNewWindowButton: Bool
     let isAppFocused: Bool
+    let hideWindowsList: Bool
     let onHide: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
@@ -449,14 +477,16 @@ private struct DockWindowPopupView: View {
                     )
                 }
             } else {
-                ForEach(windows) { window in
-                    WindowRow(
-                        icon: appIcon,
-                        title: window.title,
-                        subtitle: nil,
-                        onOpen: { onOpen(window) },
-                        onClose: { onClose(window) }
-                    )
+                if !hideWindowsList {
+                    ForEach(windows) { window in
+                        WindowRow(
+                            icon: appIcon,
+                            title: window.title,
+                            subtitle: nil,
+                            onOpen: { onOpen(window) },
+                            onClose: { onClose(window) }
+                        )
+                    }
                 }
 
                 if showNewWindowButton {
