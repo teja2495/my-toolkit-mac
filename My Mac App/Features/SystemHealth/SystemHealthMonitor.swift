@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import IOKit
 import IOKit.ps
 
 final class SystemHealthMonitor {
@@ -21,6 +22,7 @@ final class SystemHealthMonitor {
             diskUsage: diskUsage(),
             batteryLevel: battery.level,
             batteryIsCharging: battery.isCharging,
+            batteryChargingWatts: battery.isCharging == true ? chargerWatts() : nil,
             swapUsed: swap.used,
             swapTotal: swap.total,
             topCPUProcesses: Array(processes.sorted { $0.cpuUsage > $1.cpuUsage }.prefix(3)),
@@ -124,6 +126,21 @@ final class SystemHealthMonitor {
 
         guard let current, let maximum, maximum > 0 else { return (nil, isCharging) }
         return (min(100, max(0, current / maximum * 100)), isCharging)
+    }
+
+    private func chargerWatts() -> Double? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != IO_OBJECT_NULL else { return nil }
+        defer { IOObjectRelease(service) }
+
+        var propertiesRef: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(service, &propertiesRef, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let properties = propertiesRef?.takeRetainedValue() as? [String: Any],
+              let adapter = properties["AdapterDetails"] as? [String: Any],
+              let watts = adapter["Watts"] as? Int, watts > 0
+        else { return nil }
+
+        return Double(watts)
     }
 
     private func swapMetrics() -> (used: UInt64, total: UInt64) {

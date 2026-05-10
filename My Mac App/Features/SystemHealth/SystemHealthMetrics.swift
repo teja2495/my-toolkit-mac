@@ -6,6 +6,7 @@ struct SystemHealthSnapshot: Equatable {
     var diskUsage: Double
     var batteryLevel: Double?
     var batteryIsCharging: Bool?
+    var batteryChargingWatts: Double?
     var swapUsed: UInt64
     var swapTotal: UInt64
     var topCPUProcesses: [SystemHealthProcess]
@@ -51,6 +52,7 @@ struct SystemHealthSnapshot: Equatable {
         diskUsage: 0,
         batteryLevel: nil,
         batteryIsCharging: nil,
+        batteryChargingWatts: nil,
         swapUsed: 0,
         swapTotal: 0,
         topCPUProcesses: [],

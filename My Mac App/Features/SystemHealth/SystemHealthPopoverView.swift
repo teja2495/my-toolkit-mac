@@ -26,8 +26,13 @@ struct SystemHealthPopoverView: View {
                     title: "Battery",
                     value: snapshot.batteryLevel ?? 0,
                     tone: toneForBattery(snapshot.batteryLevel),
-                    isAvailable: snapshot.batteryLevel != nil
+                    isAvailable: snapshot.batteryLevel != nil,
+                    isCharging: snapshot.batteryIsCharging == true
                 )
+            }
+
+            if snapshot.batteryIsCharging == true {
+                chargingCard
             }
 
             VStack(spacing: 10) {
@@ -111,6 +116,33 @@ struct SystemHealthPopoverView: View {
     private var swapProgress: Double {
         guard snapshot.swapTotal > 0 else { return 0 }
         return Double(snapshot.swapUsed) / Double(snapshot.swapTotal)
+    }
+
+    private var chargingCard: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Self.green)
+            Text("Charging")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            if let watts = snapshot.batteryChargingWatts {
+                Text("\(Int(watts)) W")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Self.green)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Self.green.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Self.green.opacity(0.20), lineWidth: 1)
+        )
     }
 
     private func metricBarRow(_ title: String, value: String, progress: Double, tone: Color) -> some View {
@@ -222,7 +254,7 @@ struct SystemHealthPopoverView: View {
         .frame(height: 28)
     }
 
-    private func ringMetric(title: String, value: Double, tone: Color, isAvailable: Bool = true) -> some View {
+    private func ringMetric(title: String, value: Double, tone: Color, isAvailable: Bool = true, isCharging: Bool = false) -> some View {
         let clamped = min(max(value, 0), 100)
         return VStack(spacing: 7) {
             ZStack {
