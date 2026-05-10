@@ -77,19 +77,34 @@ struct SystemHealthPopoverView: View {
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
 
-            HStack(spacing: 10) {
-                Button(role: .destructive) {
-                    quitAllRegularApps()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "xmark.circle")
-                        Text("Quit All Apps")
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    Button(role: .destructive) {
+                        quitAllRegularApps()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "xmark.circle")
+                            Text("Quit All Apps")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .buttonStyle(.bordered)
+
+                    Button(role: .destructive) {
+                        restartSystem()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.clockwise.circle")
+                            Text("Restart System")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
                 Button {
                     NSWorkspace.shared.launchApplication("Activity Monitor")
@@ -334,6 +349,11 @@ struct SystemHealthPopoverView: View {
         if value > 10 { return Self.subtleRed }
         if value >= 5 { return Self.amber }
         return Self.green
+    }
+
+    private func restartSystem() {
+        let script = NSAppleScript(source: "tell app \"System Events\" to restart")
+        script?.executeAndReturnError(nil)
     }
 
     private func quitAllRegularApps() {

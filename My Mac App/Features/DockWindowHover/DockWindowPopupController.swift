@@ -66,6 +66,7 @@ final class DockWindowPopupController {
         let isAppFocused = NSRunningApplication(processIdentifier: app.processIdentifier)?.isActive ?? false
         let foregroundProcessIdentifier = app.processIdentifier
         let isVSCodeApp = isVSCodeBundle(app.bundleIdentifier)
+        let showNewWindowButton = isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)
         hostingController.rootView = AnyView(
             DockWindowPopupView(
                 appIcon: icon,
@@ -73,6 +74,7 @@ final class DockWindowPopupController {
                 windows: Array(windows.prefix(8)),
                 vscodeFolderShortcuts: vscodeFolderShortcuts,
                 isVSCodeApp: isVSCodeApp,
+                showNewWindowButton: showNewWindowButton,
                 isAppFocused: isAppFocused,
                 onHide: { [weak self] in
                     self?.hideApplication(processIdentifier: app.processIdentifier)
@@ -297,7 +299,8 @@ final class DockWindowPopupController {
         if isVSCodeBundle(app.bundleIdentifier) {
             rowCount = vscodeFolderShortcuts.count
         } else {
-            rowCount = Array(windows.prefix(8)).count + 1 // Include "New Window".
+            let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
+            rowCount = Array(windows.prefix(8)).count + newWindowRow
         }
         let width = 340.0
 
@@ -393,6 +396,17 @@ final class DockWindowPopupController {
         return bundleIdentifier == "com.microsoft.VSCode"
             || bundleIdentifier == "com.microsoft.VSCodeInsiders"
     }
+
+    private func isChromeBundle(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return bundleIdentifier == "com.google.Chrome"
+            || bundleIdentifier == "com.google.Chrome.beta"
+            || bundleIdentifier == "com.google.Chrome.canary"
+    }
+
+    private func isXcodeBundle(_ bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == "com.apple.dt.Xcode"
+    }
 }
 
 private struct DockWindowPopupView: View {
@@ -401,6 +415,7 @@ private struct DockWindowPopupView: View {
     let windows: [WindowInfo]
     let vscodeFolderShortcuts: [VSCodeFolderShortcut]
     let isVSCodeApp: Bool
+    let showNewWindowButton: Bool
     let isAppFocused: Bool
     let onHide: () -> Void
     let onQuit: () -> Void
@@ -444,13 +459,15 @@ private struct DockWindowPopupView: View {
                     )
                 }
 
-                WindowRow(
-                    icon: appIcon,
-                    title: "New Window",
-                    subtitle: nil,
-                    onOpen: onNewWindow,
-                    onClose: nil
-                )
+                if showNewWindowButton {
+                    WindowRow(
+                        icon: appIcon,
+                        title: "New Window",
+                        subtitle: nil,
+                        onOpen: onNewWindow,
+                        onClose: nil
+                    )
+                }
             }
         }
         .padding(8)

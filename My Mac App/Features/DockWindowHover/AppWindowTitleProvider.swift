@@ -159,6 +159,8 @@ final class AppWindowTitleProvider {
             normalizer = normalizedTeamsTitle
         } else if isSlackBundle(bundleIdentifier) {
             normalizer = normalizedSlackTitle
+        } else if isXcodeBundle(bundleIdentifier) {
+            normalizer = normalizedXcodeTitle
         } else {
             normalizer = nil
         }
@@ -200,6 +202,10 @@ final class AppWindowTitleProvider {
         bundleIdentifier == "com.tinyspeck.slackmacgap"
     }
 
+    private func isXcodeBundle(_ bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == "com.apple.dt.Xcode"
+    }
+
     private func normalizedVSCodeTitle(_ title: String) -> String {
         for separator in [" - ", " — ", " – "] {
             guard title.contains(separator) else { continue }
@@ -233,6 +239,16 @@ final class AppWindowTitleProvider {
     private func normalizedSlackTitle(_ title: String) -> String {
         if title.hasSuffix(" - Slack") {
             return String(title.dropLast(" - Slack".count))
+        }
+        return title
+    }
+
+    // "Project Name — My Mac App.xcodeproj" → "Project Name"
+    private func normalizedXcodeTitle(_ title: String) -> String {
+        for separator in [" — ", " – ", " - "] {
+            if let range = title.range(of: separator) {
+                return String(title[title.startIndex..<range.lowerBound])
+            }
         }
         return title
     }
