@@ -10,7 +10,7 @@ private final class KeyablePanel: NSPanel {
 
 private final class SystemHealthSnapshotReader {
     private let monitor = SystemHealthMonitor()
-    private let queue = DispatchQueue(label: "com.tk.my-mac-app.system-health.snapshot", qos: .utility)
+    private let queue = DispatchQueue(label: "com.tk.toolkit.system-health.snapshot", qos: .utility)
 
     func snapshot(includeProcesses: Bool, completion: @escaping (SystemHealthSnapshot) -> Void) {
         queue.async { [monitor] in

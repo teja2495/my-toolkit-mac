@@ -29,7 +29,7 @@ struct AboutSettingsView: View {
                             .frame(width: 44, height: 44)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("My Mac App")
+                                Text("Toolkit")
                                     .font(.system(size: 16, weight: .semibold))
                                 Text("Version \(appVersion) (\(buildNumber))")
                                     .font(.system(size: 11, design: .monospaced))

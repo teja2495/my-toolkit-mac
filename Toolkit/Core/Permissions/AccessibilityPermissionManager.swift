@@ -12,7 +12,7 @@ final class AccessibilityPermissionManager: ObservableObject {
     }
 
     func resetAccessibilityPermission() {
-        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.tk.My-Mac-App"
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "com.tk.toolkit"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         process.arguments = ["reset", "Accessibility", bundleIdentifier]

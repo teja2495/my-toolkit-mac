@@ -45,7 +45,7 @@ struct SettingsSidebar: View {
                     .frame(width: 22, height: 22)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("My Mac App")
+                    Text("Toolkit")
                         .font(.system(size: 13, weight: .semibold))
                     Text("Settings")
                         .font(.system(size: 10))

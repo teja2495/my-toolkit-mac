@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		1DED55722FA18BFF00E1B28D /* My Mac App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "My Mac App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DED55722FA18BFF00E1B28D /* Toolkit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "Toolkit.app"; path = Toolkit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1DED55742FA18BFF00E1B28D /* My Mac App */ = {
+		1DED55742FA18BFF00E1B28D /* Toolkit */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "My Mac App";
+			path = "Toolkit";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		1DED55692FA18BFF00E1B28D = {
 			isa = PBXGroup;
 			children = (
-				1DED55742FA18BFF00E1B28D /* My Mac App */,
+				1DED55742FA18BFF00E1B28D /* Toolkit */,
 				1DED55732FA18BFF00E1B28D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		1DED55732FA18BFF00E1B28D /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1DED55722FA18BFF00E1B28D /* My Mac App.app */,
+				1DED55722FA18BFF00E1B28D /* Toolkit.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,27 +48,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		1DED55712FA18BFF00E1B28D /* My Mac App */ = {
+		1DED55712FA18BFF00E1B28D /* Toolkit */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1DED557D2FA18C0100E1B28D /* Build configuration list for PBXNativeTarget "My Mac App" */;
+			buildConfigurationList = 1DED557D2FA18C0100E1B28D /* Build configuration list for PBXNativeTarget "Toolkit" */;
 			buildPhases = (
 				1DED556E2FA18BFF00E1B28D /* Sources */,
 				1DED556F2FA18BFF00E1B28D /* Frameworks */,
 				1DED55702FA18BFF00E1B28D /* Resources */,
-				AA1B2C3D4E5F6A7B8C9D0001 /* Grant Accessibility Permission */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				1DED55742FA18BFF00E1B28D /* My Mac App */,
+				1DED55742FA18BFF00E1B28D /* Toolkit */,
 			);
-			name = "My Mac App";
+			name = "Toolkit";
 			packageProductDependencies = (
 			);
-			productName = "My Mac App";
-			productReference = 1DED55722FA18BFF00E1B28D /* My Mac App.app */;
+			productName = "Toolkit";
+			productReference = 1DED55722FA18BFF00E1B28D /* Toolkit.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -86,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 1DED556D2FA18BFF00E1B28D /* Build configuration list for PBXProject "My Mac App" */;
+			buildConfigurationList = 1DED556D2FA18BFF00E1B28D /* Build configuration list for PBXProject "Toolkit" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -100,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1DED55712FA18BFF00E1B28D /* My Mac App */,
+				1DED55712FA18BFF00E1B28D /* Toolkit */,
 			);
 		};
 /* End PBXProject section */
@@ -114,28 +113,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		AA1B2C3D4E5F6A7B8C9D0001 /* Grant Accessibility Permission */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Grant Accessibility Permission";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/bash;
-			shellScript = "\"$SRCROOT/grant-accessibility.sh\"\n";
-			showEnvVarsInLog = 0;
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1DED556E2FA18BFF00E1B28D /* Sources */ = {
@@ -285,8 +262,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.tk.My-Mac-App";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tk.toolkit.mac;
+				PRODUCT_NAME = Toolkit;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -315,8 +292,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.tk.My-Mac-App";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.tk.toolkit.mac;
+				PRODUCT_NAME = Toolkit;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -330,7 +307,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1DED556D2FA18BFF00E1B28D /* Build configuration list for PBXProject "My Mac App" */ = {
+		1DED556D2FA18BFF00E1B28D /* Build configuration list for PBXProject "Toolkit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1DED557B2FA18C0100E1B28D /* Debug */,
@@ -339,7 +316,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1DED557D2FA18C0100E1B28D /* Build configuration list for PBXNativeTarget "My Mac App" */ = {
+		1DED557D2FA18C0100E1B28D /* Build configuration list for PBXNativeTarget "Toolkit" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1DED557E2FA18C0100E1B28D /* Debug */,

@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct My_Mac_AppApp: App {
+struct ToolkitApp: App {
     @StateObject private var bootstrapper = AppBootstrapper()
 
     var body: some Scene {
