@@ -56,6 +56,13 @@ final class AppBootstrapper: ObservableObject {
             summary: "Type a shortcut followed by a space to instantly expand it to the full text in any app.",
             requiresAccessibilityAccess: true,
             isEnabled: true
+        ),
+        FeatureDescriptor(
+            id: "miscellaneous",
+            title: "Miscellaneous",
+            summary: "Small system tweaks and utility behaviors.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
         )
     ]
 
@@ -114,6 +121,13 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var reversePhysicalMouseScrollEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(reversePhysicalMouseScrollEnabled, forKey: Self.reversePhysicalMouseScrollEnabledKey)
+            (liveFeatures["miscellaneous"] as? MiscellaneousFeature)?.reversePhysicalMouseScrollEnabled = reversePhysicalMouseScrollEnabled
+        }
+    }
+
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
@@ -123,6 +137,7 @@ final class AppBootstrapper: ObservableObject {
     private static let writingFixTriggerKey = "writingFixTrigger"
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
+    private static let reversePhysicalMouseScrollEnabledKey = "reversePhysicalMouseScrollEnabled"
     private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -137,6 +152,7 @@ final class AppBootstrapper: ObservableObject {
         writingFixRules = Self.loadWritingFixRules()
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
+        reversePhysicalMouseScrollEnabled = UserDefaults.standard.object(forKey: Self.reversePhysicalMouseScrollEnabledKey) as? Bool ?? true
         Self.ensureDefaultShortcut(for: writingFixRules)
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
@@ -187,6 +203,7 @@ final class AppBootstrapper: ObservableObject {
     private func updateFeatureLifecycle() {
         ensureFeatureExists(CornerNotesFeature())
         ensureFeatureExists(SystemHealthFeature())
+        ensureFeatureExists(MiscellaneousFeature())
 
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()
@@ -230,6 +247,9 @@ final class AppBootstrapper: ObservableObject {
             if let textExpanderFeature = liveFeatures[feature.id] as? TextExpanderFeature {
                 textExpanderFeature.entries = textExpanderEntries
             }
+            if let miscellaneousFeature = liveFeatures[feature.id] as? MiscellaneousFeature {
+                miscellaneousFeature.reversePhysicalMouseScrollEnabled = reversePhysicalMouseScrollEnabled
+            }
             return
         }
 
@@ -242,6 +262,9 @@ final class AppBootstrapper: ObservableObject {
         }
         if let textExpanderFeature = feature as? TextExpanderFeature {
             textExpanderFeature.entries = textExpanderEntries
+        }
+        if let miscellaneousFeature = feature as? MiscellaneousFeature {
+            miscellaneousFeature.reversePhysicalMouseScrollEnabled = reversePhysicalMouseScrollEnabled
         }
         liveFeatures[feature.id] = feature
     }

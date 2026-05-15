@@ -34,6 +34,8 @@ struct SettingsDetail: View {
             WritingFixSettingsView(bootstrapper: bootstrapper)
         case "text-expander":
             TextExpanderSettingsView(bootstrapper: bootstrapper)
+        case "miscellaneous":
+            MiscellaneousSettingsView(bootstrapper: bootstrapper)
         default:
             EmptySelectionView()
         }
