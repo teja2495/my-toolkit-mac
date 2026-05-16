@@ -127,33 +127,19 @@ final class DockHoverDetector {
     }
 
     private func accessibilityPoint(from cocoaPoint: CGPoint) -> CGPoint {
-        let screen = NSScreen.screens.first { $0.frame.contains(cocoaPoint) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
-
-        guard let screen else { return cocoaPoint }
-        return CGPoint(x: cocoaPoint.x, y: screen.frame.maxY - cocoaPoint.y)
+        // AX y=0 is the top of the PRIMARY display; the flip must use the primary
+        // screen's height, not the containing screen's height.
+        guard let primaryScreen = NSScreen.screens.first else { return cocoaPoint }
+        return CGPoint(x: cocoaPoint.x, y: primaryScreen.frame.maxY - cocoaPoint.y)
     }
 
     private func cocoaFrame(fromAccessibilityPosition position: CGPoint, size: CGSize) -> CGRect {
-        for screen in NSScreen.screens {
-            let candidate = CGRect(
-                x: position.x,
-                y: screen.frame.maxY - position.y - size.height,
-                width: size.width,
-                height: size.height
-            )
-
-            if screen.frame.intersects(candidate) {
-                return candidate
-            }
-        }
-
-        let fallbackScreen = NSScreen.main ?? NSScreen.screens.first
-        let fallbackMaxY = fallbackScreen?.frame.maxY ?? 0
+        // Same reason: AX positions are always relative to the primary display's
+        // top-left, so the inverse flip must use the primary screen's height.
+        let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
         return CGRect(
             x: position.x,
-            y: fallbackMaxY - position.y - size.height,
+            y: primaryMaxY - position.y - size.height,
             width: size.width,
             height: size.height
         )
