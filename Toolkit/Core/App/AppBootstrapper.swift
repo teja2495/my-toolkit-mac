@@ -27,14 +27,14 @@ final class AppBootstrapper: ObservableObject {
             title: "Quick Notes & Tasks",
             summary: "Opens a two-pane todo checklist and note window from the bottom-right corner.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: false
         ),
         FeatureDescriptor(
             id: "system-health",
             title: "System Health",
             summary: "Shows a menu bar health dot for CPU, memory, disk, battery, and swap usage.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: false
         ),
         FeatureDescriptor(
             id: "dock-window-hover",

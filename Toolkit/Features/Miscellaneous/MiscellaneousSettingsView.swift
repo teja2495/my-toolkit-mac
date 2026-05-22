@@ -7,6 +7,14 @@ struct MiscellaneousSettingsView: View {
         bootstrapper.availableFeatures.first(where: { $0.id == "miscellaneous" })
     }
 
+    private var quickNotesFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "corner-notes" })
+    }
+
+    private var systemHealthFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "system-health" })
+    }
+
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
@@ -16,10 +24,49 @@ struct MiscellaneousSettingsView: View {
             featureToggle
         } content: {
             SettingsCard {
-                Text("No miscellaneous settings yet.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    if let quickNotesFeature {
+                        SettingsRow(
+                            quickNotesFeature.title,
+                            description: quickNotesFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { quickNotesFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: quickNotesFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                    }
+
+                    if quickNotesFeature != nil, systemHealthFeature != nil {
+                        SettingsCardDivider()
+                    }
+
+                    if let systemHealthFeature {
+                        SettingsRow(
+                            systemHealthFeature.title,
+                            description: systemHealthFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { systemHealthFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: systemHealthFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                    }
+                }
             }
         }
     }

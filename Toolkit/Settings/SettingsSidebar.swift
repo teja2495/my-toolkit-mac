@@ -4,10 +4,19 @@ struct SettingsSidebar: View {
     @ObservedObject var bootstrapper: AppBootstrapper
     @Binding var selection: SettingsSection?
 
+    private let embeddedInMiscellaneousFeatureIDs: Set<String> = [
+        "corner-notes",
+        "system-health"
+    ]
+
+    private var sidebarFeatures: [FeatureDescriptor] {
+        bootstrapper.availableFeatures.filter { !embeddedInMiscellaneousFeatureIDs.contains($0.id) }
+    }
+
     var body: some View {
         List(selection: $selection) {
             Section {
-                ForEach(bootstrapper.availableFeatures) { feature in
+                ForEach(sidebarFeatures) { feature in
                     FeatureSidebarRow(
                         feature: feature,
                         accessibilityGranted: bootstrapper.accessibilityPermissionManager.isTrusted
