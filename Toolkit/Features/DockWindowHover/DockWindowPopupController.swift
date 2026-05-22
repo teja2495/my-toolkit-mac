@@ -22,12 +22,14 @@ final class DockWindowPopupController {
         panel.contentViewController = hostingController
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.ignoresMouseEvents = false
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
+
+        makePanelHierarchyTransparent()
     }
 
     var isVisible: Bool { panel.isVisible }
@@ -112,6 +114,14 @@ final class DockWindowPopupController {
                 }
             )
         )
+        makePanelHierarchyTransparent()
+    }
+
+    private func makePanelHierarchyTransparent() {
+        hostingController.view.wantsLayer = true
+        hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     private func closeAllWindows(processIdentifier: pid_t) {
@@ -504,12 +514,12 @@ private struct DockWindowPopupView: View {
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 8)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .preferredColorScheme(.dark)
     }
 
