@@ -10,7 +10,7 @@
 - Follow existing architecture, folder structure, and UI patterns already present in the repo.
 - Keep features independent. Avoid cross-feature coupling unless there is a strong reason.
 - After every completed code-related task (skip documentation-only tasks), run:
-  `xcodebuild -project /Users/teja2495/Projects/my-toolkit-mac/Toolkit.xcodeproj -scheme Toolkit -configuration Debug -derivedDataPath /tmp/toolkit-build build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)"; pkill -x Toolkit; sleep 0.5; open /tmp/toolkit-build/Build/Products/Debug/Toolkit.app`
+  `xcodebuild -project /Users/teja2495/Projects/my-toolkit-mac/Toolkit.xcodeproj -scheme Toolkit -configuration Debug -derivedDataPath /tmp/toolkit-build build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)"; pkill -x "Toolkit Debug"; sleep 0.5; open "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app"`
 
 ## Feature Organization
 - Put standalone utilities in `Toolkit/Features/<FeatureName>/`.

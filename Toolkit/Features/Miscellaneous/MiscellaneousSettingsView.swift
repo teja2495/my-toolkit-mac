@@ -15,18 +15,11 @@ struct MiscellaneousSettingsView: View {
         ) {
             featureToggle
         } content: {
-            VStack(alignment: .leading, spacing: 16) {
-                SettingsCard {
-                    VStack(alignment: .leading, spacing: 0) {
-                        SettingsRow(
-                            "Reverse mouse scroll",
-                            description: "When a physical mouse is connected, use reversed scroll direction. Your original system setting is restored when the mouse disconnects or this feature is disabled."
-                        ) {
-                            Toggle("", isOn: $bootstrapper.reversePhysicalMouseScrollEnabled)
-                                .labelsHidden()
-                        }
-                    }
-                }
+            SettingsCard {
+                Text("No miscellaneous settings yet.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
