@@ -24,10 +24,8 @@ struct SettingsDetail: View {
     @ViewBuilder
     private func featureDetail(id: String) -> some View {
         switch id {
-        case "corner-notes", "system-health":
+        case "corner-notes", "system-health", "media-controls":
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
-        case "media-controls":
-            MediaControlsSettingsView(bootstrapper: bootstrapper)
         case "dock-window-hover":
             DockWindowHoverSettingsView(bootstrapper: bootstrapper)
         case "writing-fix":

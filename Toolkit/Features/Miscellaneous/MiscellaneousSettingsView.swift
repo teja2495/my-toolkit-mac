@@ -15,6 +15,10 @@ struct MiscellaneousSettingsView: View {
         bootstrapper.availableFeatures.first(where: { $0.id == "system-health" })
     }
 
+    private var mediaControlsFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "media-controls" })
+    }
+
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
@@ -59,6 +63,29 @@ struct MiscellaneousSettingsView: View {
                                     get: { systemHealthFeature.isEnabled },
                                     set: { _ in
                                         bootstrapper.toggleFeature(id: systemHealthFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                    }
+
+                    if systemHealthFeature != nil, mediaControlsFeature != nil {
+                        SettingsCardDivider()
+                    }
+
+                    if let mediaControlsFeature {
+                        SettingsRow(
+                            mediaControlsFeature.title,
+                            description: mediaControlsFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { mediaControlsFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: mediaControlsFeature.id)
                                     }
                                 )
                             )

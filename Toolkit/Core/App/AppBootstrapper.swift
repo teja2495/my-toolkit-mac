@@ -41,7 +41,7 @@ final class AppBootstrapper: ObservableObject {
             title: "Media Controls",
             summary: "Shows playback controls when hovering the top-center notch area.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: false
         ),
         FeatureDescriptor(
             id: "dock-window-hover",
