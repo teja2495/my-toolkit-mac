@@ -18,17 +18,19 @@ struct MediaControlsPopoverView: View {
             artworkView
 
             VStack(spacing: 16) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(nowPlaying.title.isEmpty ? "No media title" : nowPlaying.title)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-
-                    if !displaySubtitle.isEmpty {
-                        Text(displaySubtitle)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.82))
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(nowPlaying.title.isEmpty ? "No media title" : nowPlaying.title)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white)
                             .lineLimit(1)
+
+                        if !displaySecondaryText.isEmpty {
+                            Text(displaySecondaryText)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.82))
+                                .lineLimit(1)
+                        }
                     }
 
                     Spacer(minLength: 0)
@@ -105,15 +107,19 @@ struct MediaControlsPopoverView: View {
     }
 
     private var displaySubtitle: String {
-        if !nowPlaying.artist.isEmpty, !nowPlaying.album.isEmpty {
-            return "\(nowPlaying.artist) · \(nowPlaying.album)"
-        }
-
         if !nowPlaying.artist.isEmpty {
             return nowPlaying.artist
         }
 
         return nowPlaying.appName
+    }
+
+    private var displaySecondaryText: String {
+        if !nowPlaying.album.isEmpty {
+            return nowPlaying.album
+        }
+
+        return displaySubtitle
     }
 
     @ViewBuilder
