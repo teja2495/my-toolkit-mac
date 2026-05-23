@@ -164,7 +164,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
     }
 
     private func closeInactivePanelIfNeeded() {
-        if !model.hasMedia, !isNotchHovered, !isPanelHovered {
+        if !model.hasMedia {
             closePanel()
         }
     }
@@ -250,7 +250,11 @@ final class MediaControlsFeature: NSObject, AppFeature {
         isNotchHovered = isHovered
         if isHovered {
             cancelScheduledClose()
-            showPanel()
+            if model.hasMedia {
+                showPanel()
+            } else {
+                closePanel()
+            }
         } else {
             scheduleCloseIfNeeded()
         }
