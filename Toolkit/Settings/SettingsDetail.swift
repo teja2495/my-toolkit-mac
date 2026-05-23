@@ -26,6 +26,8 @@ struct SettingsDetail: View {
         switch id {
         case "corner-notes", "system-health":
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
+        case "media-controls":
+            MediaControlsSettingsView(bootstrapper: bootstrapper)
         case "dock-window-hover":
             DockWindowHoverSettingsView(bootstrapper: bootstrapper)
         case "writing-fix":

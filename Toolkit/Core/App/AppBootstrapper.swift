@@ -37,6 +37,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: false
         ),
         FeatureDescriptor(
+            id: "media-controls",
+            title: "Media Controls",
+            summary: "Shows a pause button while media is playing, with full controls on hover.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "dock-window-hover",
             title: "App Windows",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
@@ -194,6 +201,7 @@ final class AppBootstrapper: ObservableObject {
     private func updateFeatureLifecycle() {
         ensureFeatureExists(CornerNotesFeature())
         ensureFeatureExists(SystemHealthFeature())
+        ensureFeatureExists(MediaControlsFeature())
         ensureFeatureExists(MiscellaneousFeature())
 
         if accessibilityPermissionManager.isTrusted {

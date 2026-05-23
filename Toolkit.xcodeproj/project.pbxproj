@@ -8,7 +8,27 @@
 
 /* Begin PBXFileReference section */
 		1DED55722FA18BFF00E1B28D /* Toolkit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "Toolkit.app"; path = Toolkit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8A3C7D212FC7D3F000000001 /* MediaRemoteAdapter.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = Toolkit/Features/MediaControls/mediaremote-adapter/MediaRemoteAdapter.framework; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXBuildFile section */
+		8A3C7D202FC7D3F000000001 /* MediaRemoteAdapter.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 8A3C7D212FC7D3F000000001 /* MediaRemoteAdapter.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8A3C7D222FC7D3F000000001 /* MediaRemoteAdapter.framework in Resources */ = {isa = PBXBuildFile; fileRef = 8A3C7D212FC7D3F000000001 /* MediaRemoteAdapter.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8A3C7D232FC7D3F000000001 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				8A3C7D202FC7D3F000000001 /* MediaRemoteAdapter.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1DED55742FA18BFF00E1B28D /* Toolkit */ = {
@@ -55,6 +75,7 @@
 				1DED556E2FA18BFF00E1B28D /* Sources */,
 				1DED556F2FA18BFF00E1B28D /* Frameworks */,
 				1DED55702FA18BFF00E1B28D /* Resources */,
+				8A3C7D232FC7D3F000000001 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -109,6 +130,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8A3C7D222FC7D3F000000001 /* MediaRemoteAdapter.framework in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
