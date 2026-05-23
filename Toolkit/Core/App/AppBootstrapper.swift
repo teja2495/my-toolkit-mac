@@ -39,7 +39,7 @@ final class AppBootstrapper: ObservableObject {
         FeatureDescriptor(
             id: "media-controls",
             title: "Media Controls",
-            summary: "Shows a pause button while media is playing, with full controls on hover.",
+            summary: "Shows playback controls when hovering the top-center notch area.",
             requiresAccessibilityAccess: false,
             isEnabled: true
         ),

@@ -42,36 +42,33 @@ final class MediaControlsFeature: NSObject, AppFeature {
 
     private let client = MediaRemoteClient()
     private lazy var model = MediaControlsModel(client: client)
-    private var statusItem: NSStatusItem?
     private var panel: MediaControlsPanel?
     private var refreshTimer: Timer?
     private var hoverTimer: Timer?
+    private var localClickMonitor: Any?
+    private var globalClickMonitor: Any?
     private var closeWorkItem: DispatchWorkItem?
     private var observers: [NSObjectProtocol] = []
     private var screenObserver: NSObjectProtocol?
-    private var statusVisibilityCancellable: AnyCancellable?
+    private var playbackStateCancellable: AnyCancellable?
     private var nowPlayingCancellable: AnyCancellable?
-    private var isStatusButtonHovered = false
     private var isNotchHovered = false
     private var isPanelHovered = false
     private var currentHoverScreen: NSScreen?
 
-    private let notchActivationWidth: CGFloat = 270
-    private let notchPollingHeight: CGFloat = 86
     private let panelTopOffset: CGFloat = 32
 
     func start() {
         guard refreshTimer == nil else { return }
 
-        ensureStatusItem()
         client.registerForUpdates { [weak self] info in
             Task { @MainActor [weak self] in
                 self?.model.receive(info)
-                self?.syncStatusItemVisibility()
+                self?.closeInactivePanelIfNeeded()
             }
         }
         installObservers()
-        installStatusVisibilityObserver()
+        installPanelStateObservers()
         refreshNowPlaying()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -85,6 +82,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
         }
 
         installScreenObserver()
+        installNotchClickMonitors()
         startNotchHoverPolling()
     }
 
@@ -93,34 +91,15 @@ final class MediaControlsFeature: NSObject, AppFeature {
         refreshTimer = nil
         hoverTimer?.invalidate()
         hoverTimer = nil
+        removeNotchClickMonitors()
         removeScreenObserver()
-        statusVisibilityCancellable = nil
+        playbackStateCancellable = nil
         nowPlayingCancellable = nil
         removeObservers()
         client.stopStreaming()
         closePanel()
-        removeStatusItem()
-        isStatusButtonHovered = false
         isNotchHovered = false
         currentHoverScreen = nil
-    }
-
-    @objc
-    func mouseEntered(with event: NSEvent) {
-        isStatusButtonHovered = true
-        cancelScheduledClose()
-        showPanel()
-    }
-
-    @objc
-    func mouseExited(with event: NSEvent) {
-        isStatusButtonHovered = false
-        scheduleCloseIfNeeded()
-    }
-
-    @objc
-    private func togglePause(_ sender: NSStatusBarButton) {
-        model.togglePlayPause()
     }
 
     private func installObservers() {
@@ -180,80 +159,26 @@ final class MediaControlsFeature: NSObject, AppFeature {
 
     private func refreshNowPlaying() {
         model.refresh { [weak self] in
-            self?.syncStatusItemVisibility()
+            self?.closeInactivePanelIfNeeded()
         }
     }
 
-    private func syncStatusItemVisibility() {
-        ensureStatusItem()
-        updateStatusItemIcon()
-
-        if !model.hasMedia, !isStatusButtonHovered, !isNotchHovered, !isPanelHovered {
+    private func closeInactivePanelIfNeeded() {
+        if !model.hasMedia, !isNotchHovered, !isPanelHovered {
             closePanel()
         }
     }
 
-    private func installStatusVisibilityObserver() {
-        statusVisibilityCancellable = model.$isPlaybackActive
+    private func installPanelStateObservers() {
+        playbackStateCancellable = model.$isPlaybackActive
             .removeDuplicates()
             .sink { [weak self] _ in
-                self?.syncStatusItemVisibility()
+                self?.closeInactivePanelIfNeeded()
             }
         nowPlayingCancellable = model.$nowPlaying
             .sink { [weak self] _ in
-                self?.syncStatusItemVisibility()
+                self?.closeInactivePanelIfNeeded()
             }
-    }
-
-    private func ensureStatusItem() {
-        guard statusItem == nil else {
-            updateStatusItemIcon()
-            return
-        }
-
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.target = self
-        item.button?.action = #selector(togglePause(_:))
-        item.button?.toolTip = "Pause media"
-        statusItem = item
-        updateStatusItemIcon()
-        installStatusButtonTrackingArea()
-    }
-
-    private func updateStatusItemIcon() {
-        guard let button = statusItem?.button else { return }
-        let symbolName: String
-        if model.hasMedia {
-            symbolName = model.isPlaying ? "pause.fill" : "play.fill"
-        } else {
-            symbolName = "music.note"
-        }
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Media Controls")
-        button.imagePosition = .imageOnly
-        if model.hasMedia {
-            button.toolTip = model.isPlaying ? "Pause media" : "Play media"
-        } else {
-            button.toolTip = "Media controls"
-        }
-    }
-
-    private func installStatusButtonTrackingArea() {
-        guard let button = statusItem?.button else { return }
-        let trackingArea = NSTrackingArea(
-            rect: button.bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        button.addTrackingArea(trackingArea)
-    }
-
-    private func removeStatusItem() {
-        if let statusItem {
-            NSStatusBar.system.removeStatusItem(statusItem)
-        }
-        statusItem = nil
-        isStatusButtonHovered = false
     }
 
     private func showPanel() {
@@ -263,7 +188,10 @@ final class MediaControlsFeature: NSObject, AppFeature {
 
         let screen = currentHoverScreen ?? NSScreen.main
         let panelWidth = min(max((screen?.frame.width ?? 720) * 0.48, 500), 640)
-        let rootView = MediaControlsPopoverView(model: model, preferredWidth: panelWidth)
+        let rootView = VStack(spacing: 0) {
+            Color.clear.frame(height: panelTopOffset)
+            MediaControlsPopoverView(model: model, preferredWidth: panelWidth)
+        }
         let hostingView = HoverTrackingHostingView(rootView: rootView)
         hostingView.hoverChanged = { [weak self] isHovered in
             Task { @MainActor [weak self] in
@@ -300,20 +228,6 @@ final class MediaControlsFeature: NSObject, AppFeature {
     }
 
     private func position(panel: NSPanel, width: CGFloat, height: CGFloat, screen: NSScreen?) {
-        if isStatusButtonHovered,
-           let button = statusItem?.button,
-           let buttonWindow = button.window {
-            let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
-            let screenFrame = button.window?.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-            let x = min(
-                max(buttonRect.midX - width / 2, screenFrame.minX + 8),
-                screenFrame.maxX - width - 8
-            )
-            let y = buttonRect.minY - height - 6
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
-            return
-        }
-
         guard let screen else {
             panel.center()
             return
@@ -324,7 +238,8 @@ final class MediaControlsFeature: NSObject, AppFeature {
             max(screenFrame.midX - width / 2, screenFrame.minX + 12),
             screenFrame.maxX - width - 12
         )
-        let y = screenFrame.maxY - panelTopOffset - height
+        // The transparent top strip keeps the pointer tracked from the notch down to the visible panel.
+        let y = screenFrame.maxY - height
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
@@ -354,28 +269,96 @@ final class MediaControlsFeature: NSObject, AppFeature {
         }
     }
 
-    private func pollNotchHoverRegion() {
-        let mouseLocation = NSEvent.mouseLocation
-        guard let screen = NSScreen.screenWithMouse else {
-            setNotchHovered(false, screen: nil)
+    private func installNotchClickMonitors() {
+        guard localClickMonitor == nil, globalClickMonitor == nil else { return }
+
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleNotchClick(at: NSEvent.mouseLocation)
+            }
+            return event
+        }
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleNotchClick(at: NSEvent.mouseLocation)
+            }
+        }
+    }
+
+    private func removeNotchClickMonitors() {
+        if let localClickMonitor {
+            NSEvent.removeMonitor(localClickMonitor)
+        }
+        if let globalClickMonitor {
+            NSEvent.removeMonitor(globalClickMonitor)
+        }
+        localClickMonitor = nil
+        globalClickMonitor = nil
+    }
+
+    private func handleNotchClick(at mouseLocation: NSPoint) {
+        let screen = currentHoverScreen ?? NSScreen.screenWithMouse
+        guard let screen,
+              let notchRect = notchRect(for: screen),
+              notchRect.containsNotchHoverPoint(mouseLocation) else {
             return
         }
 
-        let screenFrame = screen.frame
-        let baseX = screenFrame.midX - notchActivationWidth / 2
-        let baseY = screenFrame.maxY - notchPollingHeight
-        let isHovering = mouseLocation.y >= baseY
-            && mouseLocation.x >= baseX
-            && mouseLocation.x <= baseX + notchActivationWidth
+        model.togglePlayPause()
+    }
+
+    private func pollNotchHoverRegion() {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = panel?.isVisible == true ? currentHoverScreen : NSScreen.screenWithMouse
+        guard let screen,
+              let notchRect = notchRect(for: screen) else {
+            setNotchHovered(false, screen: nil)
+            if !isMouseOverOpenPanelRegion(mouseLocation) {
+                closePanel()
+            }
+            return
+        }
+
+        let isHovering = notchRect.containsNotchHoverPoint(mouseLocation)
+            || isMouseOverOpenPanelRegion(mouseLocation)
 
         setNotchHovered(isHovering, screen: screen)
+        if !isHovering {
+            closePanel()
+        }
+    }
+
+    private func notchRect(for screen: NSScreen) -> NSRect? {
+        guard screen.safeAreaInsets.top > 0,
+              let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea else {
+            return nil
+        }
+
+        let width = rightArea.minX - leftArea.maxX
+        guard width > 0 else { return nil }
+
+        return NSRect(
+            x: leftArea.maxX,
+            y: screen.frame.maxY - screen.safeAreaInsets.top,
+            width: width,
+            height: screen.safeAreaInsets.top
+        )
+    }
+
+    private func isMouseOverOpenPanelRegion(_ mouseLocation: NSPoint) -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        // Once open, keep the full panel-width column active through the screen top.
+        return mouseLocation.x >= panel.frame.minX
+            && mouseLocation.x <= panel.frame.maxX
+            && mouseLocation.y >= panel.frame.minY
     }
 
     private func scheduleCloseIfNeeded() {
         cancelScheduledClose()
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self, !self.isStatusButtonHovered, !self.isNotchHovered, !self.isPanelHovered else { return }
+                guard let self, !self.isNotchHovered, !self.isPanelHovered else { return }
                 self.closePanel()
             }
         }
@@ -399,6 +382,18 @@ final class MediaControlsFeature: NSObject, AppFeature {
 private extension NSScreen {
     static var screenWithMouse: NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
-        return NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
+        return NSScreen.screens.first { $0.frame.containsIncludingEdges(mouseLocation) }
+    }
+}
+
+private extension NSRect {
+    func containsNotchHoverPoint(_ point: NSPoint) -> Bool {
+        // macOS may report the pointer above the screen frame while it crosses the physical notch.
+        point.x >= minX && point.x <= maxX && point.y >= minY
+    }
+
+    func containsIncludingEdges(_ point: NSPoint) -> Bool {
+        point.x >= minX && point.x <= maxX
+            && point.y >= minY && point.y <= maxY
     }
 }

@@ -11,16 +11,16 @@ struct MediaControlsSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "Media Controls",
-            subtitle: "Shows a pause button in the menu bar while media is playing, and opens playback controls when the cursor enters the notch area."
+            subtitle: "Opens playback controls when the cursor enters the notch area."
         ) {
             featureToggle
         } content: {
             SettingsCard {
                 SettingsRow(
                     "Playback controls",
-                    description: "Hover the menu bar item or the top-center notch area to open artwork, timeline, previous, pause or play, and next controls."
+                    description: "Hover the top-center notch area to open artwork, timeline, previous, pause or play, and next controls."
                 ) {
-                    Image(systemName: "pause.circle")
+                    Image(systemName: "music.note")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(.secondary)
                 }

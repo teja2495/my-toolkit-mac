@@ -12,6 +12,12 @@ final class MediaControlsModel: ObservableObject {
     private let client: MediaRemoteClient
     private var previousInfo: MediaNowPlayingInfo = .empty
     private var previousSampleDate: Date?
+    private var pendingPlaybackTransition: PendingPlaybackTransition?
+
+    private struct PendingPlaybackTransition {
+        let expectedIsPlaying: Bool
+        let expiresAt: Date
+    }
 
     init(client: MediaRemoteClient) {
         self.client = client
@@ -26,12 +32,17 @@ final class MediaControlsModel: ObservableObject {
     }
 
     func receive(_ info: MediaNowPlayingInfo) {
-        isPlaybackActive = detectActivePlayback(for: info)
+        let receivedAt = Date()
+        let detectedPlaybackActive = detectActivePlayback(for: info)
+        isPlaybackActive = resolvedPlaybackState(
+            detectedPlaybackActive,
+            receivedAt: receivedAt
+        )
         previousInfo = info
-        previousSampleDate = Date()
+        previousSampleDate = receivedAt
         nowPlaying = info
         if !isScrubbing {
-            scrubberPosition = estimatedPosition(at: Date(), for: info)
+            scrubberPosition = estimatedPosition(at: receivedAt, for: info)
         }
     }
 
@@ -46,14 +57,19 @@ final class MediaControlsModel: ObservableObject {
     }
 
     func togglePlayPause() {
+        let expectedIsPlaying = !isPlaybackActive
+        pendingPlaybackTransition = PendingPlaybackTransition(
+            expectedIsPlaying: expectedIsPlaying,
+            expiresAt: Date().addingTimeInterval(1.25)
+        )
         nowPlaying = nowPlaying.withTimeline(
             elapsedTime: estimatedPosition(),
             timestamp: Date(),
             playbackRate: nowPlaying.playbackRate,
-            isPlaying: !isPlaybackActive
+            isPlaying: expectedIsPlaying
         )
         scrubberPosition = nowPlaying.elapsedTime
-        isPlaybackActive.toggle()
+        isPlaybackActive = expectedIsPlaying
         client.togglePlayPause()
         refreshSoon()
     }
@@ -100,6 +116,22 @@ final class MediaControlsModel: ObservableObject {
 
         let elapsedDelta = info.elapsedTime - previousInfo.elapsedTime
         return elapsedDelta > 0.2
+    }
+
+    private func resolvedPlaybackState(_ detectedState: Bool, receivedAt: Date) -> Bool {
+        guard let pendingPlaybackTransition else { return detectedState }
+
+        if detectedState == pendingPlaybackTransition.expectedIsPlaying {
+            self.pendingPlaybackTransition = nil
+            return detectedState
+        }
+
+        if receivedAt < pendingPlaybackTransition.expiresAt {
+            return pendingPlaybackTransition.expectedIsPlaying
+        }
+
+        self.pendingPlaybackTransition = nil
+        return detectedState
     }
 
     private func isSameMedia(_ lhs: MediaNowPlayingInfo, _ rhs: MediaNowPlayingInfo) -> Bool {
