@@ -11,14 +11,14 @@ struct MediaControlsSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "Media Controls",
-            subtitle: "Opens playback controls when the cursor enters the notch area."
+            subtitle: "Shows playback controls at the top center of the display."
         ) {
             featureToggle
         } content: {
             SettingsCard {
                 SettingsRow(
                     "Playback controls",
-                    description: "Hover the top-center notch area to open artwork, timeline, previous, pause or play, and next controls."
+                    description: "On notched displays, hover the top-center area to open controls. On non-notch displays, controls appear inline in the menu bar with album art, previous, play or pause, and next."
                 ) {
                     Image(systemName: "music.note")
                         .font(.system(size: 20, weight: .medium))

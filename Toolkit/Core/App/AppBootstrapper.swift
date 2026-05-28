@@ -39,7 +39,7 @@ final class AppBootstrapper: ObservableObject {
         FeatureDescriptor(
             id: "media-controls",
             title: "Media Controls",
-            summary: "Shows playback controls when hovering the top-center notch area.",
+            summary: "Shows playback controls at the top center of notched and non-notched displays.",
             requiresAccessibilityAccess: false,
             isEnabled: false
         ),

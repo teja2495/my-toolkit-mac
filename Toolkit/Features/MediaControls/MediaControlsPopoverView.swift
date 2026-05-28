@@ -36,39 +36,14 @@ struct MediaControlsPopoverView: View {
                     Spacer(minLength: 0)
                 }
 
-                TimelineView(.animation(minimumInterval: model.isPlaying ? 0.15 : nil)) { timeline in
-                    let currentPosition = model.isScrubbing
-                        ? model.scrubberPosition
-                        : model.estimatedPosition(at: timeline.date)
-
-                    VStack(spacing: 7) {
-                        MediaProgressScrubber(
-                            position: currentPosition,
-                            duration: nowPlaying.duration,
-                            onPositionChanged: { model.scrubberPosition = $0 },
-                            onEditingChanged: { isEditing in
-                                model.isScrubbing = isEditing
-                                if !isEditing {
-                                    model.seek(to: model.scrubberPosition)
-                                }
-                            }
-                        )
-
-                        HStack {
-                            Text(formatTime(currentPosition))
-                            Spacer()
-                            Text(formatTime(nowPlaying.duration))
-                        }
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color(red: 1.0, green: 0.14, blue: 0.54))
-                    }
-                }
-
                 HStack(spacing: 18) {
                     Spacer(minLength: 0)
 
-                    controlButton(systemImage: "backward.fill", help: "Previous") {
-                        model.previousTrack()
+                    controlButton(
+                        systemImage: model.shouldSeekInsteadOfSkip ? "gobackward.10" : "backward.fill",
+                        help: model.shouldSeekInsteadOfSkip ? "Back 10 seconds" : "Previous"
+                    ) {
+                        model.previousOrSeekBackward()
                     }
 
                     Button {
@@ -83,8 +58,11 @@ struct MediaControlsPopoverView: View {
                     .buttonStyle(.plain)
                     .help(model.isPlaying ? "Pause" : "Play")
 
-                    controlButton(systemImage: "forward.fill", help: "Next") {
-                        model.nextTrack()
+                    controlButton(
+                        systemImage: model.shouldSeekInsteadOfSkip ? "goforward.10" : "forward.fill",
+                        help: model.shouldSeekInsteadOfSkip ? "Forward 10 seconds" : "Next"
+                    ) {
+                        model.nextOrSeekForward()
                     }
 
                     Spacer(minLength: 0)
@@ -162,95 +140,60 @@ struct MediaControlsPopoverView: View {
         .buttonStyle(.plain)
         .help(help)
     }
-
-    private func formatTime(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite, seconds > 0 else { return "0:00" }
-        let totalSeconds = Int(seconds.rounded())
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let remainingSeconds = totalSeconds % 60
-
-        if hours > 0 {
-            return "\(hours):\(String(format: "%02d", minutes)):\(String(format: "%02d", remainingSeconds))"
-        }
-
-        return "\(minutes):\(String(format: "%02d", remainingSeconds))"
-    }
 }
 
-private struct MediaProgressScrubber: View {
-    let position: TimeInterval
-    let duration: TimeInterval
-    let onPositionChanged: (TimeInterval) -> Void
-    let onEditingChanged: (Bool) -> Void
-
-    @State private var isEditing = false
-
-    private let thumbDiameter: CGFloat = 18
+struct MediaControlsMenuBarView: View {
+    @ObservedObject var model: MediaControlsModel
+    let menuBarHeight: CGFloat
 
     var body: some View {
-        GeometryReader { geometry in
-            let trackWidth = max(geometry.size.width - thumbDiameter, 1)
-            let progress = normalizedProgress
-            let thumbOffset = trackWidth * progress
-
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.white.opacity(duration > 0 ? 0.2 : 0.1))
-                    .frame(height: 5)
-                    .padding(.horizontal, thumbDiameter / 2)
-
-                Capsule()
-                    .fill(.white.opacity(0.88))
-                    .frame(width: thumbOffset, height: 5)
-                    .padding(.leading, thumbDiameter / 2)
-
-                Circle()
-                    .fill(.white.opacity(duration > 0 ? 0.96 : 0.52))
-                    .frame(width: thumbDiameter, height: thumbDiameter)
-                    .offset(x: thumbOffset)
-                    .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
+        HStack(spacing: 10) {
+            controlButton(
+                systemImage: model.shouldSeekInsteadOfSkip ? "gobackward.10" : "backward.fill",
+                help: model.shouldSeekInsteadOfSkip ? "Back 10 seconds" : "Previous"
+            ) {
+                model.previousOrSeekBackward()
             }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard duration > 0 else { return }
-                        if !isEditing {
-                            isEditing = true
-                            onEditingChanged(true)
-                        }
-                        onPositionChanged(position(for: value.location.x, trackWidth: trackWidth))
-                    }
-                    .onEnded { value in
-                        guard isEditing else { return }
-                        onPositionChanged(position(for: value.location.x, trackWidth: trackWidth))
-                        isEditing = false
-                        onEditingChanged(false)
-                    }
-            )
+
+            Button {
+                model.togglePlayPause()
+            } label: {
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help(model.isPlaying ? "Pause" : "Play")
+
+            controlButton(
+                systemImage: model.shouldSeekInsteadOfSkip ? "goforward.10" : "forward.fill",
+                help: model.shouldSeekInsteadOfSkip ? "Forward 10 seconds" : "Next"
+            ) {
+                model.nextOrSeekForward()
+            }
         }
-        .frame(height: thumbDiameter)
-        .accessibilityElement()
-        .accessibilityLabel("Playback position")
-        .accessibilityValue(formatAccessibilityTime(position))
+        .padding(.horizontal, 10)
+        .frame(height: menuBarHeight)
+        .background(
+            RoundedRectangle(cornerRadius: max(8, (menuBarHeight / 2) - 1), style: .continuous)
+                .fill(Color.black.opacity(0.82))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: max(8, (menuBarHeight / 2) - 1), style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: max(8, (menuBarHeight / 2) - 1), style: .continuous))
     }
 
-    private var normalizedProgress: CGFloat {
-        guard duration > 0, duration.isFinite else { return 0 }
-        return CGFloat(min(max(position / duration, 0), 1))
-    }
-
-    private func position(for x: CGFloat, trackWidth: CGFloat) -> TimeInterval {
-        let progress = min(max((x - thumbDiameter / 2) / trackWidth, 0), 1)
-        return TimeInterval(progress) * duration
-    }
-
-    private func formatAccessibilityTime(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite, seconds > 0 else { return "0 minutes, 0 seconds" }
-        let totalSeconds = Int(seconds.rounded())
-        let minutes = totalSeconds / 60
-        let remainingSeconds = totalSeconds % 60
-        return "\(minutes) minutes, \(remainingSeconds) seconds"
+    private func controlButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }

@@ -4,6 +4,9 @@ import Foundation
 
 @MainActor
 final class MediaControlsModel: ObservableObject {
+    private static let longFormSeekThreshold: TimeInterval = 6 * 60
+    private static let longFormSeekInterval: TimeInterval = 10
+
     @Published var nowPlaying: MediaNowPlayingInfo = .empty
     @Published var scrubberPosition: Double = 0
     @Published var isScrubbing = false
@@ -89,14 +92,41 @@ final class MediaControlsModel: ObservableObject {
         refreshSoon()
     }
 
+    func previousOrSeekBackward() {
+        if shouldSeekInsteadOfSkip {
+            seek(to: estimatedPosition() - Self.longFormSeekInterval)
+        } else {
+            previousTrack()
+        }
+    }
+
+    func nextOrSeekForward() {
+        if shouldSeekInsteadOfSkip {
+            seek(to: estimatedPosition() + Self.longFormSeekInterval)
+        } else {
+            nextTrack()
+        }
+    }
+
     func seek(to position: Double) {
-        scrubberPosition = min(max(position, 0), max(nowPlaying.duration, 0))
-        client.seek(to: position)
+        let clampedPosition = min(max(position, 0), max(nowPlaying.duration, 0))
+        nowPlaying = nowPlaying.withTimeline(
+            elapsedTime: clampedPosition,
+            timestamp: Date(),
+            playbackRate: nowPlaying.playbackRate,
+            isPlaying: isPlaybackActive
+        )
+        scrubberPosition = clampedPosition
+        client.seek(to: clampedPosition)
         refreshSoon()
     }
 
     func estimatedPosition(at date: Date = Date()) -> Double {
         estimatedPosition(at: date, for: nowPlaying)
+    }
+
+    var shouldSeekInsteadOfSkip: Bool {
+        nowPlaying.duration > Self.longFormSeekThreshold
     }
 
     private func refreshSoon() {

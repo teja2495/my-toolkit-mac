@@ -43,6 +43,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
     private let client = MediaRemoteClient()
     private lazy var model = MediaControlsModel(client: client)
     private var panel: MediaControlsPanel?
+    private var menuBarPanels: [CGDirectDisplayID: MediaControlsPanel] = [:]
     private var refreshTimer: Timer?
     private var hoverTimer: Timer?
     private var localClickMonitor: Any?
@@ -57,6 +58,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
     private var currentHoverScreen: NSScreen?
 
     private let panelTopOffset: CGFloat = 32
+    private let menuBarPanelWidth: CGFloat = 126
 
     func start() {
         guard refreshTimer == nil else { return }
@@ -64,7 +66,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
         client.registerForUpdates { [weak self] info in
             Task { @MainActor [weak self] in
                 self?.model.receive(info)
-                self?.closeInactivePanelIfNeeded()
+                self?.updateDisplayPresentation()
             }
         }
         installObservers()
@@ -98,6 +100,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
         removeObservers()
         client.stopStreaming()
         closePanel()
+        removeAllMenuBarPanels()
         isNotchHovered = false
         currentHoverScreen = nil
     }
@@ -146,6 +149,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
                         screen: self?.currentHoverScreen ?? NSScreen.main
                     )
                 }
+                self?.syncMenuBarPanels(forceLayoutUpdate: true)
             }
         }
     }
@@ -159,25 +163,26 @@ final class MediaControlsFeature: NSObject, AppFeature {
 
     private func refreshNowPlaying() {
         model.refresh { [weak self] in
-            self?.closeInactivePanelIfNeeded()
+            self?.updateDisplayPresentation()
         }
     }
 
-    private func closeInactivePanelIfNeeded() {
+    private func updateDisplayPresentation() {
         if !model.hasMedia {
             closePanel()
         }
+        syncMenuBarPanels()
     }
 
     private func installPanelStateObservers() {
         playbackStateCancellable = model.$isPlaybackActive
             .removeDuplicates()
             .sink { [weak self] _ in
-                self?.closeInactivePanelIfNeeded()
+                self?.updateDisplayPresentation()
             }
         nowPlayingCancellable = model.$nowPlaying
             .sink { [weak self] _ in
-                self?.closeInactivePanelIfNeeded()
+                self?.updateDisplayPresentation()
             }
     }
 
@@ -227,6 +232,72 @@ final class MediaControlsFeature: NSObject, AppFeature {
         newPanel.orderFrontRegardless()
     }
 
+    private func syncMenuBarPanels(forceLayoutUpdate: Bool = false) {
+        let eligibleScreens = NSScreen.screens.filter { notchRect(for: $0) == nil && menuBarHeight(for: $0) > 0 }
+        let eligibleDisplayIDs = Set(eligibleScreens.compactMap(\.displayID))
+
+        let staleDisplayIDs = menuBarPanels.keys.filter { !eligibleDisplayIDs.contains($0) || !model.hasMedia }
+        for displayID in staleDisplayIDs {
+            menuBarPanels[displayID]?.orderOut(nil)
+            menuBarPanels.removeValue(forKey: displayID)
+        }
+
+        guard model.hasMedia else { return }
+
+        for screen in eligibleScreens {
+            guard let displayID = screen.displayID else { continue }
+
+            let panelHeight = menuBarHeight(for: screen)
+            if let panel = menuBarPanels[displayID] {
+                if forceLayoutUpdate || abs(panel.frame.height - panelHeight) > 0.5 {
+                    panel.contentView = NSHostingView(
+                        rootView: MediaControlsMenuBarView(
+                            model: model,
+                            menuBarHeight: panelHeight
+                        )
+                    )
+                    panel.setContentSize(NSSize(width: menuBarPanelWidth, height: panelHeight))
+                }
+                positionMenuBarPanel(panel, screen: screen, height: panelHeight)
+                if !panel.isVisible {
+                    panel.orderFrontRegardless()
+                }
+                continue
+            }
+
+            let newPanel = MediaControlsPanel(
+                contentRect: NSRect(x: 0, y: 0, width: menuBarPanelWidth, height: panelHeight),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            newPanel.isOpaque = false
+            newPanel.backgroundColor = .clear
+            newPanel.hasShadow = false
+            newPanel.ignoresMouseEvents = false
+            newPanel.isFloatingPanel = true
+            newPanel.level = .mainMenu + 2
+            newPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            newPanel.isReleasedWhenClosed = false
+            newPanel.contentView = NSHostingView(
+                rootView: MediaControlsMenuBarView(
+                    model: model,
+                    menuBarHeight: panelHeight
+                )
+            )
+            positionMenuBarPanel(newPanel, screen: screen, height: panelHeight)
+            menuBarPanels[displayID] = newPanel
+            newPanel.orderFrontRegardless()
+        }
+    }
+
+    private func removeAllMenuBarPanels() {
+        for panel in menuBarPanels.values {
+            panel.orderOut(nil)
+        }
+        menuBarPanels.removeAll()
+    }
+
     private func position(panel: NSPanel, width: CGFloat, height: CGFloat, screen: NSScreen?) {
         guard let screen else {
             panel.center()
@@ -241,6 +312,18 @@ final class MediaControlsFeature: NSObject, AppFeature {
         // The transparent top strip keeps the pointer tracked from the notch down to the visible panel.
         let y = screenFrame.maxY - height
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func positionMenuBarPanel(_ panel: NSPanel, screen: NSScreen, height: CGFloat) {
+        let screenFrame = screen.frame
+        let x = floor(screenFrame.midX - (menuBarPanelWidth / 2))
+        let y = screenFrame.maxY - height
+        panel.setFrame(NSRect(x: x, y: y, width: menuBarPanelWidth, height: height), display: true)
+    }
+
+    private func menuBarHeight(for screen: NSScreen) -> CGFloat {
+        let measuredHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        return max(measuredHeight, 24)
     }
 
     private func setNotchHovered(_ isHovered: Bool, screen: NSScreen?) {
@@ -387,6 +470,10 @@ private extension NSScreen {
     static var screenWithMouse: NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         return NSScreen.screens.first { $0.frame.containsIncludingEdges(mouseLocation) }
+    }
+
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
     }
 }
 

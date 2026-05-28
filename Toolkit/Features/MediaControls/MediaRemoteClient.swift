@@ -100,6 +100,7 @@ final class MediaRemoteClient {
     private var adapterBuffer = ""
     private var adapterNowPlaying: MediaNowPlayingInfo?
     private var onNowPlayingUpdate: ((MediaNowPlayingInfo) -> Void)?
+    private let adapterQueue = DispatchQueue(label: "MediaRemoteAdapterCommandQueue", qos: .userInitiated)
 
     var isAvailable: Bool {
         getNowPlayingInfo != nil
@@ -190,28 +191,34 @@ final class MediaRemoteClient {
     }
 
     func togglePlayPause() {
+        if sendAdapterCommand(.togglePlayPause) { return }
         sendCommandFunction?(Command.togglePlayPause, nil)
     }
 
     func pause() {
+        if sendAdapterCommand(.pause) { return }
         sendCommandFunction?(Command.pause, nil)
     }
 
     func nextTrack() {
+        if sendAdapterCommand(.nextTrack) { return }
         sendCommandFunction?(Command.nextTrack, nil)
     }
 
     func previousTrack() {
+        if sendAdapterCommand(.previousTrack) { return }
         sendCommandFunction?(Command.previousTrack, nil)
     }
 
     func seek(to position: TimeInterval) {
+        let safePosition = max(0, position)
+
+        sendAdapterSeek(to: safePosition)
         if let setElapsedTimeFunction {
-            setElapsedTimeFunction(max(0, position))
-            return
+            setElapsedTimeFunction(safePosition)
         }
 
-        let options = ["kMRMediaRemoteOptionPlaybackPosition": max(0, position)] as CFDictionary
+        let options = ["kMRMediaRemoteOptionPlaybackPosition": safePosition] as CFDictionary
         sendCommandFunction?(Command.seekToPlaybackPosition, options)
     }
 
@@ -231,6 +238,45 @@ final class MediaRemoteClient {
     private static func loadSymbol<T>(_ name: String, from handle: UnsafeMutableRawPointer?) -> T? {
         guard let handle, let symbol = dlsym(handle, name) else { return nil }
         return unsafeBitCast(symbol, to: T.self)
+    }
+
+    private enum AdapterCommand: Int32 {
+        case play = 0
+        case pause = 1
+        case togglePlayPause = 2
+        case nextTrack = 4
+        case previousTrack = 5
+    }
+
+    @discardableResult
+    private func sendAdapterCommand(_ command: AdapterCommand) -> Bool {
+        runAdapterCommand(arguments: ["send", String(command.rawValue)])
+    }
+
+    @discardableResult
+    private func sendAdapterSeek(to position: TimeInterval) -> Bool {
+        let micros = max(0, Int64((position * 1_000_000).rounded()))
+        return runAdapterCommand(arguments: ["seek", String(micros)])
+    }
+
+    @discardableResult
+    private func runAdapterCommand(arguments: [String]) -> Bool {
+        guard let scriptURL = adapterScriptURL(),
+              let frameworkURL = adapterFrameworkURL() else {
+            return false
+        }
+
+        adapterQueue.async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+            process.arguments = [scriptURL.path, frameworkURL.path] + arguments
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try? process.run()
+            process.waitUntilExit()
+        }
+
+        return true
     }
 
     private func fetchIsPlaying(completion: @escaping (Bool) -> Void) {
