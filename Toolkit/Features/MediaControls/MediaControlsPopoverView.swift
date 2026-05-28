@@ -102,31 +102,39 @@ struct MediaControlsPopoverView: View {
 
     @ViewBuilder
     private var artworkView: some View {
-        if let artwork = nowPlaying.artwork {
-            Image(nsImage: artwork)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 116, height: 116)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.96, green: 0.05, blue: 0.34),
-                            Color(red: 1.0, green: 0.24, blue: 0.52)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 56, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.76))
-                )
-                .frame(width: 116, height: 116)
+        Button {
+            model.openNowPlayingApp()
+        } label: {
+            Group {
+                if let artwork = nowPlaying.artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.96, green: 0.05, blue: 0.34),
+                                    Color(red: 1.0, green: 0.24, blue: 0.52)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 56, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.76))
+                        )
+                        .frame(width: 116, height: 116)
+                }
+            }
         }
+        .buttonStyle(.plain)
+        .help("Open current media app")
     }
 
     private func controlButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -145,9 +153,12 @@ struct MediaControlsPopoverView: View {
 struct MediaControlsMenuBarView: View {
     @ObservedObject var model: MediaControlsModel
     let menuBarHeight: CGFloat
+    private let artworkInset: CGFloat = 3
 
     var body: some View {
         HStack(spacing: 10) {
+            artworkView
+
             controlButton(
                 systemImage: model.shouldSeekInsteadOfSkip ? "gobackward.10" : "backward.fill",
                 help: model.shouldSeekInsteadOfSkip ? "Back 10 seconds" : "Previous"
@@ -184,6 +195,47 @@ struct MediaControlsMenuBarView: View {
                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: max(8, (menuBarHeight / 2) - 1), style: .continuous))
+    }
+
+    private var artworkSize: CGFloat {
+        max(menuBarHeight - (artworkInset * 2), 18)
+    }
+
+    @ViewBuilder
+    private var artworkView: some View {
+        Button {
+            model.openNowPlayingApp()
+        } label: {
+            Group {
+                if let artwork = model.nowPlaying.artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: artworkSize, height: artworkSize)
+                        .clipShape(RoundedRectangle(cornerRadius: max(6, artworkSize * 0.28), style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: max(6, artworkSize * 0.28), style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.96, green: 0.05, blue: 0.34),
+                                    Color(red: 1.0, green: 0.24, blue: 0.52)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: max(9, artworkSize * 0.42), weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.76))
+                        )
+                        .frame(width: artworkSize, height: artworkSize)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Open current media app")
     }
 
     private func controlButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {

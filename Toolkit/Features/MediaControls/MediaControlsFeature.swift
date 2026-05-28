@@ -58,8 +58,6 @@ final class MediaControlsFeature: NSObject, AppFeature {
     private var currentHoverScreen: NSScreen?
 
     private let panelTopOffset: CGFloat = 32
-    private let menuBarPanelWidth: CGFloat = 126
-
     func start() {
         guard refreshTimer == nil else { return }
 
@@ -248,17 +246,20 @@ final class MediaControlsFeature: NSObject, AppFeature {
             guard let displayID = screen.displayID else { continue }
 
             let panelHeight = menuBarHeight(for: screen)
+            let panelWidth = menuBarPanelWidth(for: panelHeight)
             if let panel = menuBarPanels[displayID] {
-                if forceLayoutUpdate || abs(panel.frame.height - panelHeight) > 0.5 {
+                if forceLayoutUpdate
+                    || abs(panel.frame.height - panelHeight) > 0.5
+                    || abs(panel.frame.width - panelWidth) > 0.5 {
                     panel.contentView = NSHostingView(
                         rootView: MediaControlsMenuBarView(
                             model: model,
                             menuBarHeight: panelHeight
                         )
                     )
-                    panel.setContentSize(NSSize(width: menuBarPanelWidth, height: panelHeight))
+                    panel.setContentSize(NSSize(width: panelWidth, height: panelHeight))
                 }
-                positionMenuBarPanel(panel, screen: screen, height: panelHeight)
+                positionMenuBarPanel(panel, screen: screen, width: panelWidth, height: panelHeight)
                 if !panel.isVisible {
                     panel.orderFrontRegardless()
                 }
@@ -266,7 +267,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
             }
 
             let newPanel = MediaControlsPanel(
-                contentRect: NSRect(x: 0, y: 0, width: menuBarPanelWidth, height: panelHeight),
+                contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -285,7 +286,7 @@ final class MediaControlsFeature: NSObject, AppFeature {
                     menuBarHeight: panelHeight
                 )
             )
-            positionMenuBarPanel(newPanel, screen: screen, height: panelHeight)
+            positionMenuBarPanel(newPanel, screen: screen, width: panelWidth, height: panelHeight)
             menuBarPanels[displayID] = newPanel
             newPanel.orderFrontRegardless()
         }
@@ -314,16 +315,20 @@ final class MediaControlsFeature: NSObject, AppFeature {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
-    private func positionMenuBarPanel(_ panel: NSPanel, screen: NSScreen, height: CGFloat) {
+    private func positionMenuBarPanel(_ panel: NSPanel, screen: NSScreen, width: CGFloat, height: CGFloat) {
         let screenFrame = screen.frame
-        let x = floor(screenFrame.midX - (menuBarPanelWidth / 2))
+        let x = floor(screenFrame.midX - (width / 2))
         let y = screenFrame.maxY - height
-        panel.setFrame(NSRect(x: x, y: y, width: menuBarPanelWidth, height: height), display: true)
+        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 
     private func menuBarHeight(for screen: NSScreen) -> CGFloat {
         let measuredHeight = screen.frame.maxY - screen.visibleFrame.maxY
         return max(measuredHeight, 24)
+    }
+
+    private func menuBarPanelWidth(for height: CGFloat) -> CGFloat {
+        max(154, height + 118)
     }
 
     private func setNotchHovered(_ isHovered: Bool, screen: NSScreen?) {

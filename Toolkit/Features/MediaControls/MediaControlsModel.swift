@@ -121,6 +121,32 @@ final class MediaControlsModel: ObservableObject {
         refreshSoon()
     }
 
+    func openNowPlayingApp() {
+        let bundleIdentifier = nowPlaying.bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let appName = nowPlaying.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let runningApp = resolvedRunningApplication(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        ) {
+            runningApp.unhide()
+            runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [bundleIdentifier, appName] in
+                self.activateViaAppleScript(bundleIdentifier: bundleIdentifier, appName: appName)
+            }
+            return
+        }
+
+        if let appURL = resolvedApplicationURL(bundleIdentifier: bundleIdentifier, appName: appName) {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
+            return
+        }
+
+        activateViaAppleScript(bundleIdentifier: bundleIdentifier, appName: appName)
+    }
+
     func estimatedPosition(at date: Date = Date()) -> Double {
         estimatedPosition(at: date, for: nowPlaying)
     }
@@ -180,5 +206,68 @@ final class MediaControlsModel: ObservableObject {
             elapsed += max(0, date.timeIntervalSince(info.timestamp)) * max(info.playbackRate, 1)
         }
         return min(max(elapsed, 0), info.duration)
+    }
+
+    private func resolvedRunningApplication(
+        bundleIdentifier: String,
+        appName: String
+    ) -> NSRunningApplication? {
+        if !bundleIdentifier.isEmpty,
+           let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first {
+            return app
+        }
+
+        guard !appName.isEmpty else { return nil }
+        return NSWorkspace.shared.runningApplications.first {
+            ($0.localizedName ?? "").caseInsensitiveCompare(appName) == .orderedSame
+        }
+    }
+
+    private func resolvedApplicationURL(
+        bundleIdentifier: String,
+        appName: String
+    ) -> URL? {
+        if !bundleIdentifier.isEmpty,
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            return appURL
+        }
+
+        guard !appName.isEmpty,
+              let appPath = NSWorkspace.shared.fullPath(forApplication: appName) else {
+            return nil
+        }
+        return URL(fileURLWithPath: appPath)
+    }
+
+    private func activateViaAppleScript(bundleIdentifier: String, appName: String) {
+        let scriptSource: String
+        if !bundleIdentifier.isEmpty {
+            let escapedBundleIdentifier = appleScriptEscaped(bundleIdentifier)
+            scriptSource = """
+            tell application id "\(escapedBundleIdentifier)"
+                reopen
+                activate
+            end tell
+            """
+        } else if !appName.isEmpty {
+            let escapedAppName = appleScriptEscaped(appName)
+            scriptSource = """
+            tell application "\(escapedAppName)"
+                reopen
+                activate
+            end tell
+            """
+        } else {
+            return
+        }
+
+        var error: NSDictionary?
+        NSAppleScript(source: scriptSource)?.executeAndReturnError(&error)
+    }
+
+    private func appleScriptEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 }
