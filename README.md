@@ -18,6 +18,9 @@ Type a trigger word at the end of any text field and Apple Intelligence rewrites
 ### Quick Notes & Tasks
 A two-pane todo + notebook panel that opens when you flick the cursor into the bottom-right corner of the screen. Flick again to dismiss. No accessibility permission needed — it uses cursor position only.
 
+### Media Controls
+Shows current playback controls at the top center of the display. On Macs with a notch, hover the top-center area to open a compact now-playing panel with artwork plus previous, play or pause, and next controls. On Macs without a notch, the controls appear inline in the menu bar instead. For long-form media, previous and next switch to 10-second seek controls.
+
 ### App Windows (Dock Hover)
 Hover an app icon in the Dock to peek at that app's open windows by title. Configurable hover delay. For VS Code, you can also configure a list of favorite folders to show in the popup instead — tap a row to open the folder directly. Right-click an icon to suppress the popup for that app until you move away.
 
