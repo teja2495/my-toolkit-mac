@@ -28,6 +28,8 @@ struct SettingsDetail: View {
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
         case "dock-window-hover":
             DockWindowHoverSettingsView(bootstrapper: bootstrapper)
+        case "phone-integration":
+            PhoneIntegrationSettingsView(bootstrapper: bootstrapper)
         case "writing-fix":
             WritingFixSettingsView(bootstrapper: bootstrapper)
         case "text-expander":

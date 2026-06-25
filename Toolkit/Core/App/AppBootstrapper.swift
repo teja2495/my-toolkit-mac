@@ -44,6 +44,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: false
         ),
         FeatureDescriptor(
+            id: "phone-integration",
+            title: "Phone",
+            summary: "Pairs with Android phones over the local network for secure Toolkit integration.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "dock-window-hover",
             title: "App Windows",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
@@ -183,6 +190,11 @@ final class AppBootstrapper: ObservableObject {
         (liveFeatures["dock-window-hover"] as? DockWindowHoverFeature)?.isSuspended = isSuspended
     }
 
+    func phoneIntegrationController() -> PhoneBridgeController {
+        ensureFeatureExists(PhoneIntegrationFeature())
+        return (liveFeatures["phone-integration"] as? PhoneIntegrationFeature)?.controller ?? PhoneBridgeController()
+    }
+
     private func startPermissionWatchdog() {
         permissionRefreshTimer?.invalidate()
         permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -202,6 +214,7 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(CornerNotesFeature())
         ensureFeatureExists(SystemHealthFeature())
         ensureFeatureExists(MediaControlsFeature())
+        ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
 
         if accessibilityPermissionManager.isTrusted {
