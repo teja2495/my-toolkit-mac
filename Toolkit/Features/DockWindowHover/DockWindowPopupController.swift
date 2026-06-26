@@ -87,6 +87,9 @@ final class DockWindowPopupController {
                 onHide: { [weak self] in
                     self?.closeAllWindows(processIdentifier: app.processIdentifier)
                 },
+                onRestart: { [weak self] in
+                    self?.restartApplication(processIdentifier: app.processIdentifier)
+                },
                 onQuit: { [weak self] in
                     self?.quitApplication(processIdentifier: app.processIdentifier)
                 },
@@ -390,6 +393,21 @@ final class DockWindowPopupController {
         }
     }
 
+    private func restartApplication(processIdentifier: pid_t) {
+        guard let app = NSRunningApplication(processIdentifier: processIdentifier),
+              let bundleURL = app.bundleURL else { return }
+        _ = app.terminate()
+        Task { @MainActor in
+            await waitForApplicationTransition {
+                app.isTerminated
+            }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = false
+            NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, _ in }
+            hide()
+        }
+    }
+
     private func forceQuitApplication(processIdentifier: pid_t) {
         guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
         _ = app.forceTerminate()
@@ -456,13 +474,13 @@ private struct DockWindowPopupView: View {
     let isAppFocused: Bool
     let hideWindowsList: Bool
     let onHide: () -> Void
+    let onRestart: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
     let onOpen: (WindowInfo) -> Void
     let onClose: (WindowInfo) -> Void
     let onNewWindow: () -> Void
     let onOpenVSCodeFolder: (VSCodeFolderShortcut) -> Void
-    @StateObject private var modifierKeyState = ModifierKeyState()
 
     var body: some View {
         VStack(spacing: 6) {
@@ -471,9 +489,9 @@ private struct DockWindowPopupView: View {
                 name: appName,
                 showsHideButton: isAppFocused,
                 onHide: onHide,
+                onRestart: onRestart,
                 onQuit: onQuit,
-                onForceQuit: onForceQuit,
-                modifierKeyState: modifierKeyState
+                onForceQuit: onForceQuit
             )
 
             if isVSCodeApp {
@@ -535,9 +553,10 @@ private struct AppHeaderRow: View {
     let name: String
     let showsHideButton: Bool
     let onHide: () -> Void
+    let onRestart: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
-    @ObservedObject var modifierKeyState: ModifierKeyState
+    private let actionButtonSize = CGSize(width: 34, height: 24)
 
     var body: some View {
         HStack(spacing: 10) {
@@ -556,14 +575,26 @@ private struct AppHeaderRow: View {
 
             Spacer(minLength: 4)
 
-            if showsHideButton && !modifierKeyState.isCommandPressed {
-                HideActionButton(action: onHide)
+            HStack(spacing: 8) {
+                if showsHideButton {
+                    HideActionButton(action: onHide, size: actionButtonSize)
+                }
+                ActionButton(
+                    systemImage: "arrow.clockwise",
+                    tint: .white,
+                    backgroundTint: Color.white.opacity(0.16),
+                    size: actionButtonSize,
+                    action: onRestart
+                )
+                QuitActionButton(
+                    systemImage: "power",
+                    tint: .white,
+                    backgroundTint: Color.white.opacity(0.16),
+                    size: actionButtonSize,
+                    onQuit: onQuit,
+                    onForceQuit: onForceQuit
+                )
             }
-            PowerActionButton(
-                isCommandPressed: modifierKeyState.isCommandPressed,
-                onQuit: onQuit,
-                onForceQuit: onForceQuit
-            )
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
@@ -572,90 +603,114 @@ private struct AppHeaderRow: View {
 
 private struct HideActionButton: View {
     let action: () -> Void
+    let size: CGSize
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 0) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-            }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .frame(height: 24)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.16))
-            )
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size.width, height: size.height)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.16))
+                )
         }
         .buttonStyle(.plain)
     }
 }
 
-private struct PowerActionButton: View {
-    let isCommandPressed: Bool
+private struct ActionButton: View {
+    let systemImage: String
+    let tint: Color
+    let backgroundTint: Color
+    let size: CGSize
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: size.width, height: size.height)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(backgroundTint)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct QuitActionButton: View {
+    let systemImage: String
+    let tint: Color
+    let backgroundTint: Color
+    let size: CGSize
     let onQuit: () -> Void
     let onForceQuit: () -> Void
 
     var body: some View {
-        Button(action: {
-            if isCommandPressed {
-                onForceQuit()
-            } else {
-                onQuit()
-            }
-        }) {
-            HStack(spacing: 6) {
-                Image(systemName: "power")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(isCommandPressed ? "Force Quit" : "Quit")
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .foregroundStyle(isCommandPressed ? Color.red : Color.white)
-            .padding(.horizontal, 10)
-            .frame(height: 24)
-            .layoutPriority(1)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isCommandPressed ? Color.red.opacity(0.16) : Color.white.opacity(0.16))
-            )
+        MouseButtonActionView(leftAction: onQuit, rightAction: onForceQuit) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: size.width, height: size.height)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(backgroundTint)
+                )
         }
-        .buttonStyle(.plain)
+        .frame(width: size.width, height: size.height)
     }
 }
 
-@MainActor
-private final class ModifierKeyState: ObservableObject {
-    @Published private(set) var isCommandPressed: Bool = NSEvent.modifierFlags.contains(.command)
-    private var localMonitor: Any?
-    private var globalMonitor: Any?
+private struct MouseButtonActionView<Content: View>: NSViewRepresentable {
+    let leftAction: () -> Void
+    let rightAction: () -> Void
+    let content: Content
 
-    init() {
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.update(from: event.modifierFlags)
-            return event
-        }
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            Task { @MainActor in
-                self?.update(from: event.modifierFlags)
-            }
-        }
+    init(
+        leftAction: @escaping () -> Void,
+        rightAction: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.leftAction = leftAction
+        self.rightAction = rightAction
+        self.content = content()
     }
 
-    deinit {
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-        }
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-        }
+    func makeNSView(context: Context) -> MouseButtonHostingView<Content> {
+        let view = MouseButtonHostingView(rootView: content)
+        view.leftAction = leftAction
+        view.rightAction = rightAction
+        return view
     }
 
-    private func update(from flags: NSEvent.ModifierFlags) {
-        let pressed = flags.contains(.command)
-        if isCommandPressed != pressed {
-            isCommandPressed = pressed
+    func updateNSView(_ nsView: MouseButtonHostingView<Content>, context: Context) {
+        nsView.rootView = content
+        nsView.leftAction = leftAction
+        nsView.rightAction = rightAction
+    }
+}
+
+private final class MouseButtonHostingView<Content: View>: NSHostingView<Content> {
+    var leftAction: (() -> Void)?
+    var rightAction: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        leftAction?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        rightAction?()
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        if event.buttonNumber == 2 {
+            rightAction?()
+        } else {
+            super.otherMouseDown(with: event)
         }
     }
 }

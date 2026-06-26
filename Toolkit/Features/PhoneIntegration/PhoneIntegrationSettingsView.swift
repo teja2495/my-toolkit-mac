@@ -22,47 +22,50 @@ struct PhoneIntegrationSettingsView: View {
         return formatter
     }()
 
+    private var feature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "phone-integration" })
+    }
+
     init(bootstrapper: AppBootstrapper) {
         self.bootstrapper = bootstrapper
         _controller = ObservedObject(wrappedValue: bootstrapper.phoneIntegrationController())
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            connectionCard
-            pairingCard
-            fileBrowserCard
-                .frame(maxHeight: .infinity, alignment: .top)
-        }
-        .padding(.top, 32)
-        .padding(.horizontal, 36)
-        .padding(.bottom, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .scrollContentBackground(.hidden)
-        .overlay {
-            if isTargetedByFileDrop {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
-                    }
-                    .overlay {
-                        VStack(spacing: 8) {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .font(.system(size: 24, weight: .semibold))
-                                .foregroundStyle(Color.accentColor)
-                            Text("Drop files to send them to Android Downloads")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.primary)
-                        }
-                    }
-                    .padding(.horizontal, 36)
-                    .padding(.top, 32)
-                    .padding(.bottom, 28)
-                    .allowsHitTesting(false)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                connectionCard
+                pairingCard
+                fileBrowserCard
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
+            .overlay {
+                if isTargetedByFileDrop {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.08))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
+                        }
+                        .overlay {
+                            VStack(spacing: 8) {
+                                Image(systemName: "arrow.down.doc.fill")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                                Text("Drop files to send them to Android Downloads")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
+            .padding(.top, 32)
+            .padding(.horizontal, 36)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollContentBackground(.hidden)
         .onDrop(
             of: [UTType.fileURL],
             delegate: PhoneTabDropDelegate(
@@ -97,9 +100,27 @@ struct PhoneIntegrationSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var featureToggle: some View {
+        if let feature {
+            FeatureEnableToggle(
+                isOn: feature.isEnabled,
+                disabled: false
+            ) {
+                bootstrapper.toggleFeature(id: feature.id)
+            }
+        }
+    }
+
     private var connectionCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 14) {
+                SettingsRow("Phone") {
+                    featureToggle
+                }
+
+                Divider()
+
                 HStack(spacing: 12) {
                     Image(systemName: "iphone.gen3.radiowaves.left.and.right")
                         .font(.system(size: 18, weight: .medium))
@@ -154,6 +175,13 @@ struct PhoneIntegrationSettingsView: View {
                     Text(footerStatusMessage)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                SettingsRow("Sync Mac clipboard to phone") {
+                    Toggle("", isOn: $bootstrapper.phoneClipboardSyncEnabled)
+                        .labelsHidden()
                 }
             }
         }

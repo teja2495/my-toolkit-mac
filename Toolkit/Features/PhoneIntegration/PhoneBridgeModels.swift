@@ -16,6 +16,8 @@ enum PhoneBridgeProtocol {
     static let readFileResult = "file.read.result"
     static let shareFileChunk = "file.share.chunk"
     static let shareFileResult = "file.share.result"
+    static let setClipboard = "clipboard.set"
+    static let setClipboardResult = "clipboard.set.result"
 }
 
 struct PhoneTrustedDevice: Identifiable, Codable, Equatable {

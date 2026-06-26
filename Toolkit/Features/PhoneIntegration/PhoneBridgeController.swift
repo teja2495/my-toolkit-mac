@@ -63,6 +63,10 @@ final class PhoneBridgeController: ObservableObject {
     private var queuedOutgoingShareFiles: [OutgoingShareFile] = []
     private var activeOutgoingShareRequestIDs: Set<String> = []
     private var activeIncomingShareTransfers: [String: IncomingShareTransfer] = [:]
+    private var isStarted = false
+    private var clipboardMonitorTimer: Timer?
+    private var lastObservedClipboardChangeCount: Int?
+    private var lastSyncedClipboardText: String?
 
     init() {
         trustedDevices = store.trustedDevices()
@@ -70,6 +74,8 @@ final class PhoneBridgeController: ObservableObject {
 
     func start() {
         guard browser == nil else { return }
+        isStarted = true
+        startClipboardMonitoringIfNeeded()
         logger.debug("Starting phone bridge browser")
         let browser = NWBrowser(
             for: .bonjourWithTXTRecord(type: PhoneBridgeProtocol.serviceType, domain: nil),
@@ -128,6 +134,8 @@ final class PhoneBridgeController: ObservableObject {
 
     func stop() {
         logger.debug("Stopping phone bridge browser and active pairing")
+        isStarted = false
+        stopClipboardMonitoring()
         browser?.cancel()
         browser = nil
         activePairing?.connection.cancel()
@@ -149,8 +157,20 @@ final class PhoneBridgeController: ObservableObject {
         activeFileTransfers = [:]
         queuedOutgoingShareFiles = []
         activeOutgoingShareRequestIDs = []
+        lastObservedClipboardChangeCount = nil
+        lastSyncedClipboardText = nil
         cleanupIncomingShareTransfers()
         connectionState = .idle
+    }
+
+    func setClipboardSyncEnabled(_ isEnabled: Bool) {
+        guard isStarted else { return }
+        if isEnabled {
+            startClipboardMonitoringIfNeeded()
+            syncCurrentClipboardIfPossible(force: false)
+        } else {
+            stopClipboardMonitoring()
+        }
     }
 
     func pair(with device: DiscoveredPhoneDevice) {
@@ -420,6 +440,7 @@ final class PhoneBridgeController: ObservableObject {
                         self.connectionState = .connected(pairing.deviceName)
                         self.transferStatusMessage = ""
                         self.fileBrowserMessage = "Loading files from \(pairing.deviceName)..."
+                        self.syncCurrentClipboardIfPossible(force: false)
                         self.refreshFiles()
                         self.processQueuedOutgoingShareFilesIfPossible()
                     } else if messageType == PhoneBridgeProtocol.listFilesResult {
@@ -434,6 +455,10 @@ final class PhoneBridgeController: ObservableObject {
                         self.handleIncomingShareChunk(json, pairing: pairing)
                     } else if messageType == PhoneBridgeProtocol.shareFileResult {
                         self.handleOutgoingShareResult(json)
+                    } else if messageType == PhoneBridgeProtocol.setClipboard {
+                        self.handleSetClipboardMessage(json, pairing: pairing)
+                    } else if messageType == PhoneBridgeProtocol.setClipboardResult {
+                        self.handleSetClipboardResult(json)
                     } else if messageType == PhoneBridgeProtocol.error {
                         if self.handleFileTransferErrorIfNeeded(json) || self.handleShareTransferErrorIfNeeded(json) {
                             self.receiveEncryptedMessages(pairing: pairing)
@@ -490,6 +515,95 @@ final class PhoneBridgeController: ObservableObject {
             logger.error("Failed to send encrypted message to deviceId=\(pairing.deviceId, privacy: .public): \(error.localizedDescription, privacy: .public)")
             connectionState = .error(error.localizedDescription)
             transferStatusMessage = error.localizedDescription
+        }
+    }
+
+    private func startClipboardMonitoringIfNeeded() {
+        guard isStarted else { return }
+        guard clipboardMonitorTimer == nil else { return }
+        let pasteboard = NSPasteboard.general
+        lastObservedClipboardChangeCount = pasteboard.changeCount
+        clipboardMonitorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollClipboardIfNeeded()
+            }
+        }
+        if let clipboardMonitorTimer {
+            RunLoop.main.add(clipboardMonitorTimer, forMode: .common)
+        }
+    }
+
+    private func stopClipboardMonitoring() {
+        clipboardMonitorTimer?.invalidate()
+        clipboardMonitorTimer = nil
+    }
+
+    private func pollClipboardIfNeeded() {
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
+        guard changeCount != lastObservedClipboardChangeCount else { return }
+        lastObservedClipboardChangeCount = changeCount
+        syncCurrentClipboardIfPossible(force: false)
+    }
+
+    private func syncCurrentClipboardIfPossible(force: Bool) {
+        guard let activePairing else { return }
+        guard let clipboardText = NSPasteboard.general.string(forType: .string) else { return }
+        guard !clipboardText.isEmpty else { return }
+        if !force, clipboardText == lastSyncedClipboardText {
+            return
+        }
+        lastSyncedClipboardText = clipboardText
+        sendEncrypted(
+            [
+                "type": PhoneBridgeProtocol.setClipboard,
+                "text": clipboardText
+            ],
+            pairing: activePairing
+        )
+    }
+
+    private func handleSetClipboardMessage(_ json: [String: Any], pairing: ActivePairing) {
+        guard let requestID = json["requestId"] as? String,
+              let text = json["text"] as? String,
+              !text.isEmpty else {
+            sendEncrypted(
+                [
+                    "type": PhoneBridgeProtocol.error,
+                    "message": "Toolkit received an invalid clipboard payload."
+                ],
+                pairing: pairing
+            )
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let didWrite = pasteboard.setString(text, forType: .string)
+        lastSyncedClipboardText = text
+        lastObservedClipboardChangeCount = pasteboard.changeCount
+        if didWrite {
+            transferStatusMessage = "Updated Mac clipboard from \(pairing.deviceName)."
+        } else {
+            transferStatusMessage = "Toolkit could not update the Mac clipboard."
+        }
+        sendEncrypted(
+            [
+                "type": PhoneBridgeProtocol.setClipboardResult,
+                "requestId": requestID,
+                "success": didWrite,
+                "message": didWrite ? "Updated Mac clipboard." : "Toolkit could not update the Mac clipboard."
+            ],
+            pairing: pairing
+        )
+    }
+
+    private func handleSetClipboardResult(_ json: [String: Any]) {
+        guard let success = json["success"] as? Bool else { return }
+        if success {
+            transferStatusMessage = (json["message"] as? String) ?? "Updated Android clipboard."
+        } else {
+            transferStatusMessage = (json["message"] as? String) ?? "Toolkit could not update the Android clipboard."
         }
     }
 
@@ -930,6 +1044,7 @@ final class PhoneBridgeController: ObservableObject {
         try FileManager.default.createDirectory(at: downloadsURL, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: transfer.temporaryFileURL, to: destinationURL)
         copyFileURLToClipboard(destinationURL)
+        openDownloadsFolderInFinder(downloadsURL)
         cleanupIncomingShareTransfer(requestID: requestID)
         return destinationURL
     }
@@ -1088,6 +1203,10 @@ final class PhoneBridgeController: ObservableObject {
             throw CocoaError(.fileNoSuchFile)
         }
         return downloadsDirectory
+    }
+
+    private func openDownloadsFolderInFinder(_ downloadsURL: URL) {
+        NSWorkspace.shared.open(downloadsURL)
     }
 
     private func uniqueDestinationURL(in directory: URL, preferredName: String) -> URL {

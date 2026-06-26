@@ -135,15 +135,26 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var phoneClipboardSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(phoneClipboardSyncEnabled, forKey: Self.phoneClipboardSyncEnabledKey)
+            (liveFeatures["phone-integration"] as? PhoneIntegrationFeature)?
+                .controller
+                .setClipboardSyncEnabled(phoneClipboardSyncEnabled)
+        }
+    }
+
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
     private static let dockHoverPopupDelayKey = "dockHoverPopupDelay"
-    private static let defaultDockHoverPopupDelay = 0.25
+    private static let defaultDockHoverPopupDelay = 2.0
+    private static let legacyDockHoverPopupDelay = 0.25
     private static let writingFixRulesKey = "writingFixRules"
     private static let writingFixTriggerKey = "writingFixTrigger"
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
+    private static let phoneClipboardSyncEnabledKey = "phoneClipboardSyncEnabled"
     private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -153,11 +164,21 @@ final class AppBootstrapper: ObservableObject {
 
     init() {
         let savedDelay = UserDefaults.standard.object(forKey: Self.dockHoverPopupDelayKey) as? Double
-        dockHoverPopupDelay = savedDelay ?? Self.defaultDockHoverPopupDelay
+        let resolvedDelay: Double
+        if let savedDelay, abs(savedDelay - Self.legacyDockHoverPopupDelay) < 0.001 {
+            resolvedDelay = Self.defaultDockHoverPopupDelay
+        } else {
+            resolvedDelay = savedDelay ?? Self.defaultDockHoverPopupDelay
+        }
+        dockHoverPopupDelay = resolvedDelay
         textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
+        phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
+        if resolvedDelay != savedDelay {
+            UserDefaults.standard.set(resolvedDelay, forKey: Self.dockHoverPopupDelayKey)
+        }
         Self.ensureDefaultShortcut(for: writingFixRules)
         accessibilityPermissionManager.objectWillChange
             .sink { [weak self] _ in
@@ -268,6 +289,9 @@ final class AppBootstrapper: ObservableObject {
             if let textExpanderFeature = liveFeatures[feature.id] as? TextExpanderFeature {
                 textExpanderFeature.entries = textExpanderEntries
             }
+            if let phoneIntegrationFeature = liveFeatures[feature.id] as? PhoneIntegrationFeature {
+                phoneIntegrationFeature.controller.setClipboardSyncEnabled(phoneClipboardSyncEnabled)
+            }
             return
         }
 
@@ -280,6 +304,9 @@ final class AppBootstrapper: ObservableObject {
         }
         if let textExpanderFeature = feature as? TextExpanderFeature {
             textExpanderFeature.entries = textExpanderEntries
+        }
+        if let phoneIntegrationFeature = feature as? PhoneIntegrationFeature {
+            phoneIntegrationFeature.controller.setClipboardSyncEnabled(phoneClipboardSyncEnabled)
         }
         liveFeatures[feature.id] = feature
     }

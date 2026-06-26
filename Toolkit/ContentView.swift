@@ -36,6 +36,9 @@ struct ContentView: View {
     }
 
     private var defaultSelection: SettingsSection {
+        if bootstrapper.availableFeatures.contains(where: { $0.id == "phone-integration" }) {
+            return .feature("phone-integration")
+        }
         if let firstFeature = bootstrapper.availableFeatures.first {
             return .feature(firstFeature.id)
         }

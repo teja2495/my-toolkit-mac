@@ -45,7 +45,7 @@ struct DockWindowHoverSettingsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Slider(
                                 value: $bootstrapper.dockHoverPopupDelay,
-                                in: 0...1.5,
+                                in: 0...2.0,
                                 step: 0.05
                             )
                             .tint(Color.accentColor)
@@ -57,7 +57,7 @@ struct DockWindowHoverSettingsView: View {
                                     .tracking(0.6)
                                     .foregroundStyle(.tertiary)
                                 Spacer()
-                                Text("1.5s")
+                                Text("2.0s")
                                     .font(.system(size: 9, weight: .medium))
                                     .tracking(0.6)
                                     .foregroundStyle(.tertiary)
