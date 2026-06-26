@@ -195,6 +195,15 @@ final class AppBootstrapper: ObservableObject {
         return (liveFeatures["phone-integration"] as? PhoneIntegrationFeature)?.controller ?? PhoneBridgeController()
     }
 
+    func handleSharedFiles(_ urls: [URL]) {
+        let controller = phoneIntegrationController()
+        if liveFeatures["phone-integration"] == nil {
+            ensureFeatureExists(PhoneIntegrationFeature())
+        }
+        controller.start()
+        controller.queueFilesForRemoteShare(urls)
+    }
+
     private func startPermissionWatchdog() {
         permissionRefreshTimer?.invalidate()
         permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in

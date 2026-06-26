@@ -107,6 +107,12 @@ struct PhoneIntegrationSettingsView: View {
                         }
                     }
                 }
+
+                if let footerStatusMessage {
+                    Text(footerStatusMessage)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -200,6 +206,13 @@ struct PhoneIntegrationSettingsView: View {
         default:
             return controller.connectionState.label
         }
+    }
+
+    private var footerStatusMessage: String? {
+        let message = controller.transferStatusMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return nil }
+        guard message != connectionTitle else { return nil }
+        return message
     }
 
     private var fileBrowserCard: some View {
@@ -334,29 +347,22 @@ struct PhoneIntegrationSettingsView: View {
         Button {
             openInPreview(file)
         } label: {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .topTrailing) {
                 PhoneFileThumbnailView(file: file)
                     .frame(height: 150)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 
                 if file.mimeType.hasPrefix("video/") {
-                    Text(file.filename)
-                        .font(.system(size: 10, weight: .medium))
-                        .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.black.opacity(0.55), in: Capsule())
-                        .foregroundStyle(.white.opacity(0.95))
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.white.opacity(0.96))
+                        .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
                         .padding(8)
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.04))
-        )
         .onDrag {
             dragItemProvider(for: file)
         }
@@ -536,14 +542,11 @@ private struct PhoneFileThumbnailView: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.08))
-
             if let thumbnail = thumbnailImage {
                 GeometryReader { geometry in
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .scaledToFit()
+                        .scaledToFill()
                         .frame(
                             width: geometry.size.width,
                             height: geometry.size.height
@@ -555,23 +558,13 @@ private struct PhoneFileThumbnailView: View {
                 }
                 .clipped()
             } else {
-                Image(systemName: placeholderIconName)
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            if file.mimeType.hasPrefix("video/") {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .shadow(radius: 6)
-                            .padding(8)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .overlay {
+                        Image(systemName: placeholderIconName)
+                            .font(.system(size: 28, weight: .medium))
+                            .foregroundStyle(.secondary)
                     }
-                }
             }
         }
     }

@@ -1,16 +1,21 @@
+import AppKit
 import Combine
 import CryptoKit
 import Foundation
 import Network
 import OSLog
+import UniformTypeIdentifiers
 
 @MainActor
 final class PhoneBridgeController: ObservableObject {
     private static let maxFilesPerCategory = 30
+    private static let maxShareChunkSizeBytes = 256 * 1024
     private static let nonDocumentFileExtensions: Set<String> = [
         "apk",
         "avif",
         "bmp",
+        "data",
+        "db",
         "gif",
         "heic",
         "jpeg",
@@ -34,6 +39,7 @@ final class PhoneBridgeController: ObservableObject {
     @Published private(set) var fileItems: [PhoneFileItem] = []
     @Published private(set) var isLoadingFiles: Bool = false
     @Published private(set) var fileBrowserMessage: String = "Pair and connect to an Android phone to browse files."
+    @Published private(set) var transferStatusMessage: String = ""
     @Published var selectedCategory: PhoneFileCategory = .photosVideos {
         didSet {
             refreshVisibleFileItems()
@@ -54,6 +60,9 @@ final class PhoneBridgeController: ObservableObject {
     private var queuedFileCategories: [PhoneFileCategory] = []
     private var activeFileRequestCategory: PhoneFileCategory?
     private var activeFileTransfers: [String: ActiveFileTransfer] = [:]
+    private var queuedOutgoingShareFiles: [OutgoingShareFile] = []
+    private var activeOutgoingShareRequestIDs: Set<String> = []
+    private var activeIncomingShareTransfers: [String: IncomingShareTransfer] = [:]
 
     init() {
         trustedDevices = store.trustedDevices()
@@ -75,6 +84,7 @@ final class PhoneBridgeController: ObservableObject {
                 case .failed(let error):
                     self?.logger.error("Browser failed: \(error.localizedDescription, privacy: .public)")
                     self?.connectionState = .error(error.localizedDescription)
+                    self?.transferStatusMessage = error.localizedDescription
                 case .cancelled:
                     self?.logger.debug("Browser cancelled")
                     self?.connectionState = .idle
@@ -127,6 +137,7 @@ final class PhoneBridgeController: ObservableObject {
         fileRequestRetryTask = nil
         fileItems = []
         fileBrowserMessage = "Pair and connect to an Android phone to browse files."
+        transferStatusMessage = ""
         isLoadingFiles = false
         connectedServiceName = nil
         allDiscoveredDevices = []
@@ -136,6 +147,9 @@ final class PhoneBridgeController: ObservableObject {
         queuedFileCategories = []
         activeFileRequestCategory = nil
         activeFileTransfers = [:]
+        queuedOutgoingShareFiles = []
+        activeOutgoingShareRequestIDs = []
+        cleanupIncomingShareTransfers()
         connectionState = .idle
     }
 
@@ -156,12 +170,14 @@ final class PhoneBridgeController: ObservableObject {
             case .failed(let error):
                 Task { @MainActor in
                     self?.logger.error("Connection failed for service=\(device.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    self?.failAllShareTransfers(error)
                     self?.activePairing = nil
                     self?.pendingPairing = nil
                     self?.connectedServiceName = nil
                     self?.reconnectingServiceNames.remove(device.name)
                     self?.refreshDiscoveredDevices()
                     self?.connectionState = .error(error.localizedDescription)
+                    self?.transferStatusMessage = error.localizedDescription
                     self?.attemptAutoReconnectIfPossible()
                 }
             case .cancelled:
@@ -241,6 +257,27 @@ final class PhoneBridgeController: ObservableObject {
         )
     }
 
+    func queueFilesForRemoteShare(_ urls: [URL]) {
+        let normalizedURLs = urls.filter(\.isFileURL)
+        guard !normalizedURLs.isEmpty else { return }
+        Task {
+            do {
+                let preparedFiles = try prepareOutgoingShareFiles(from: normalizedURLs)
+                await MainActor.run {
+                    queuedOutgoingShareFiles.append(contentsOf: preparedFiles)
+                    transferStatusMessage = preparedFiles.count == 1
+                        ? "Waiting to send \(preparedFiles[0].filename) to Android."
+                        : "Waiting to send \(preparedFiles.count) files to Android."
+                    processQueuedOutgoingShareFilesIfPossible()
+                }
+            } catch {
+                await MainActor.run {
+                    transferStatusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
     func isTrustedDiscoveredDevice(_ device: DiscoveredPhoneDevice) -> Bool {
         if let advertisedDeviceId = device.advertisedDeviceId {
             return trustedDevices.contains { $0.id == advertisedDeviceId }
@@ -279,6 +316,7 @@ final class PhoneBridgeController: ObservableObject {
         } catch {
             Task { @MainActor in
                 connectionState = .error(error.localizedDescription)
+                transferStatusMessage = error.localizedDescription
             }
         }
     }
@@ -349,6 +387,7 @@ final class PhoneBridgeController: ObservableObject {
                     self.reconnectingServiceNames.remove(discoveredServiceName)
                     connection.cancel()
                     self.connectionState = .error(error.localizedDescription)
+                    self.transferStatusMessage = error.localizedDescription
                 }
             }
         }
@@ -362,7 +401,8 @@ final class PhoneBridgeController: ObservableObject {
                     let encrypted = try result.get()
                     let decrypted = try self.crypto.decrypt(encrypted, key: pairing.sessionKey)
                     let json = try Self.jsonObject(from: decrypted)
-                    if json["type"] as? String == PhoneBridgeProtocol.pairComplete {
+                    let messageType = json["type"] as? String
+                    if messageType == PhoneBridgeProtocol.pairComplete {
                         self.logger.debug("Received pair.complete from deviceId=\(pairing.deviceId, privacy: .public)")
                         let now = Date()
                         let trusted = PhoneTrustedDevice(
@@ -378,18 +418,24 @@ final class PhoneBridgeController: ObservableObject {
                         self.reconnectingServiceNames.remove(pairing.serviceName)
                         self.refreshDiscoveredDevices()
                         self.connectionState = .connected(pairing.deviceName)
+                        self.transferStatusMessage = ""
                         self.fileBrowserMessage = "Loading files from \(pairing.deviceName)..."
                         self.refreshFiles()
-                    } else if json["type"] as? String == PhoneBridgeProtocol.listFilesResult {
+                        self.processQueuedOutgoingShareFilesIfPossible()
+                    } else if messageType == PhoneBridgeProtocol.listFilesResult {
                         self.fileRequestRetryTask?.cancel()
                         self.fileRequestRetryTask = nil
                         let count = (json["files"] as? [[String: Any]] ?? []).count
                         self.logger.debug("Received files.list.result from deviceId=\(pairing.deviceId, privacy: .public) count=\(count)")
                         self.handleListFilesResult(json)
-                    } else if json["type"] as? String == PhoneBridgeProtocol.readFileResult {
+                    } else if messageType == PhoneBridgeProtocol.readFileResult {
                         self.handleReadFileResult(json)
-                    } else if json["type"] as? String == PhoneBridgeProtocol.error {
-                        if self.handleFileTransferErrorIfNeeded(json) {
+                    } else if messageType == PhoneBridgeProtocol.shareFileChunk {
+                        self.handleIncomingShareChunk(json, pairing: pairing)
+                    } else if messageType == PhoneBridgeProtocol.shareFileResult {
+                        self.handleOutgoingShareResult(json)
+                    } else if messageType == PhoneBridgeProtocol.error {
+                        if self.handleFileTransferErrorIfNeeded(json) || self.handleShareTransferErrorIfNeeded(json) {
                             self.receiveEncryptedMessages(pairing: pairing)
                             return
                         }
@@ -400,12 +446,14 @@ final class PhoneBridgeController: ObservableObject {
                         self.activeFileRequestCategory = nil
                         self.fileItems = []
                         self.fileBrowserMessage = (json["message"] as? String) ?? "Android reported a file browsing error."
+                        self.transferStatusMessage = (json["message"] as? String) ?? "Android reported a bridge error."
                         self.processQueuedFileRequestsIfPossible()
                     }
                     self.receiveEncryptedMessages(pairing: pairing)
                 } catch {
                     self.logger.error("Receive/decrypt failed for deviceId=\(pairing.deviceId, privacy: .public): \(error.localizedDescription, privacy: .public)")
                     pairing.connection.cancel()
+                    self.failAllShareTransfers(error)
                     self.activePairing = nil
                     self.pendingPairing = nil
                     self.connectedServiceName = nil
@@ -421,6 +469,7 @@ final class PhoneBridgeController: ObservableObject {
                     self.isLoadingFiles = false
                     self.refreshDiscoveredDevices()
                     self.connectionState = .error(error.localizedDescription)
+                    self.transferStatusMessage = error.localizedDescription
                     activeTransfers.values.forEach { transfer in
                         transfer.completion(.failure(error))
                     }
@@ -440,6 +489,7 @@ final class PhoneBridgeController: ObservableObject {
         } catch {
             logger.error("Failed to send encrypted message to deviceId=\(pairing.deviceId, privacy: .public): \(error.localizedDescription, privacy: .public)")
             connectionState = .error(error.localizedDescription)
+            transferStatusMessage = error.localizedDescription
         }
     }
 
@@ -755,6 +805,179 @@ final class PhoneBridgeController: ObservableObject {
         }
     }
 
+    private func processQueuedOutgoingShareFilesIfPossible() {
+        guard let activePairing else { return }
+        guard !queuedOutgoingShareFiles.isEmpty else { return }
+        let queuedFiles = queuedOutgoingShareFiles
+        queuedOutgoingShareFiles.removeAll()
+        transferStatusMessage = queuedFiles.count == 1
+            ? "Sending \(queuedFiles[0].filename) to \(activePairing.deviceName)..."
+            : "Sending \(queuedFiles.count) files to \(activePairing.deviceName)..."
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            for file in queuedFiles {
+                do {
+                    try await self?.streamOutgoingShareFile(file)
+                } catch {
+                    await MainActor.run {
+                        self?.transferStatusMessage = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    private func streamOutgoingShareFile(_ file: OutgoingShareFile) async throws {
+        guard let pairing = await MainActor.run(body: { activePairing }) else {
+            throw PhoneBridgeControllerError.noActiveConnection
+        }
+        try await MainActor.run {
+            activeOutgoingShareRequestIDs.insert(file.requestID)
+        }
+
+        let handle = try FileHandle(forReadingFrom: file.sourceURL)
+        defer { try? handle.close() }
+
+        var chunkIndex = 0
+        while true {
+            let chunk = try handle.read(upToCount: Self.maxShareChunkSizeBytes) ?? Data()
+            let isLastChunk = chunk.isEmpty || chunk.count < Self.maxShareChunkSizeBytes
+            let payload: [String: Any] = [
+                "type": PhoneBridgeProtocol.shareFileChunk,
+                "requestId": file.requestID,
+                "filename": file.filename,
+                "mimeType": file.mimeType,
+                "chunkIndex": chunkIndex,
+                "isLastChunk": isLastChunk,
+                "data": chunk.base64EncodedString()
+            ]
+            await MainActor.run {
+                sendEncrypted(payload, pairing: pairing)
+            }
+            if isLastChunk {
+                break
+            }
+            chunkIndex += 1
+        }
+    }
+
+    private func handleIncomingShareChunk(_ json: [String: Any], pairing: ActivePairing) {
+        guard let requestID = json["requestId"] as? String,
+              let filename = json["filename"] as? String,
+              let mimeType = json["mimeType"] as? String,
+              let chunkIndex = json["chunkIndex"] as? Int,
+              let isLastChunk = json["isLastChunk"] as? Bool,
+              let dataString = json["data"] as? String,
+              let chunkData = Data(base64Encoded: dataString, options: [.ignoreUnknownCharacters]) else {
+            sendShareFailure(
+                requestID: json["requestId"] as? String,
+                message: "Toolkit received an invalid shared file payload.",
+                pairing: pairing
+            )
+            return
+        }
+
+        do {
+            let sanitizedFilename = sanitizedFilename(filename)
+            if activeIncomingShareTransfers[requestID] == nil {
+                activeIncomingShareTransfers[requestID] = try IncomingShareTransfer(
+                    requestID: requestID,
+                    filename: sanitizedFilename,
+                    mimeType: mimeType
+                )
+            }
+            guard var transfer = activeIncomingShareTransfers[requestID] else {
+                throw PhoneBridgeControllerError.invalidShareTransferResponse
+            }
+            guard transfer.nextChunkIndex == chunkIndex else {
+                throw PhoneBridgeControllerError.invalidShareTransferResponse
+            }
+            try transfer.write(chunkData)
+            transfer.nextChunkIndex += 1
+            activeIncomingShareTransfers[requestID] = transfer
+
+            if isLastChunk {
+                let savedURL = try finalizeIncomingShareTransfer(requestID: requestID, transfer: transfer)
+                sendEncrypted(
+                    [
+                        "type": PhoneBridgeProtocol.shareFileResult,
+                        "requestId": requestID,
+                        "success": true,
+                        "savedFilename": savedURL.lastPathComponent
+                    ],
+                    pairing: pairing
+                )
+                transferStatusMessage = "Saved \(savedURL.lastPathComponent) to Downloads and copied it to the clipboard."
+            }
+        } catch {
+            cleanupIncomingShareTransfer(requestID: requestID)
+            sendShareFailure(
+                requestID: requestID,
+                message: error.localizedDescription,
+                pairing: pairing
+            )
+        }
+    }
+
+    private func finalizeIncomingShareTransfer(requestID: String, transfer: IncomingShareTransfer) throws -> URL {
+        var transfer = transfer
+        try transfer.close()
+        let downloadsURL = try downloadsDirectoryURL()
+        let destinationURL = uniqueDestinationURL(
+            in: downloadsURL,
+            preferredName: transfer.filename
+        )
+        try FileManager.default.createDirectory(at: downloadsURL, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: transfer.temporaryFileURL, to: destinationURL)
+        copyFileURLToClipboard(destinationURL)
+        cleanupIncomingShareTransfer(requestID: requestID)
+        return destinationURL
+    }
+
+    private func handleOutgoingShareResult(_ json: [String: Any]) {
+        guard let requestID = json["requestId"] as? String,
+              activeOutgoingShareRequestIDs.contains(requestID) else {
+            return
+        }
+        activeOutgoingShareRequestIDs.remove(requestID)
+        let savedFilename = (json["savedFilename"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if json["success"] as? Bool == true {
+            if let savedFilename, !savedFilename.isEmpty {
+                transferStatusMessage = "Saved \(savedFilename) to Android Downloads."
+            } else {
+                transferStatusMessage = "Saved the shared file to Android Downloads."
+            }
+        } else {
+            transferStatusMessage = (json["message"] as? String) ?? "Android could not save the shared file."
+        }
+    }
+
+    private func handleShareTransferErrorIfNeeded(_ json: [String: Any]) -> Bool {
+        guard let requestID = json["requestId"] as? String else { return false }
+        if activeOutgoingShareRequestIDs.contains(requestID) {
+            activeOutgoingShareRequestIDs.remove(requestID)
+            transferStatusMessage = (json["message"] as? String) ?? "Android could not save the shared file."
+            return true
+        }
+        if activeIncomingShareTransfers[requestID] != nil {
+            cleanupIncomingShareTransfer(requestID: requestID)
+            transferStatusMessage = (json["message"] as? String) ?? "Toolkit could not finish receiving the shared file."
+            return true
+        }
+        return false
+    }
+
+    private func sendShareFailure(requestID: String?, message: String, pairing: ActivePairing) {
+        var payload: [String: Any] = [
+            "type": PhoneBridgeProtocol.error,
+            "message": message
+        ]
+        if let requestID {
+            payload["requestId"] = requestID
+        }
+        sendEncrypted(payload, pairing: pairing)
+    }
+
     private func requestedCategories(for selectedCategory: PhoneFileCategory) -> [PhoneFileCategory] {
         switch selectedCategory {
         case .documents:
@@ -821,6 +1044,89 @@ final class PhoneBridgeController: ObservableObject {
         return fileURL
     }
 
+    private func prepareOutgoingShareFiles(from urls: [URL]) throws -> [OutgoingShareFile] {
+        try urls.map { url in
+            let resourceValues = try url.resourceValues(forKeys: [.isRegularFileKey, .nameKey, .contentTypeKey])
+            guard resourceValues.isRegularFile == true else {
+                throw PhoneBridgeControllerError.unsupportedShareSource(url.lastPathComponent)
+            }
+            let filename = resourceValues.name ?? url.lastPathComponent
+            let mimeType = resourceValues.contentType?.preferredMIMEType ?? "application/octet-stream"
+            return OutgoingShareFile(
+                requestID: UUID().uuidString,
+                sourceURL: url,
+                filename: filename,
+                mimeType: mimeType
+            )
+        }
+    }
+
+    private func failAllShareTransfers(_ error: Error) {
+        if !queuedOutgoingShareFiles.isEmpty || !activeOutgoingShareRequestIDs.isEmpty || !activeIncomingShareTransfers.isEmpty {
+            transferStatusMessage = error.localizedDescription
+        }
+        queuedOutgoingShareFiles = []
+        activeOutgoingShareRequestIDs = []
+        cleanupIncomingShareTransfers()
+    }
+
+    private func cleanupIncomingShareTransfers() {
+        activeIncomingShareTransfers.keys.forEach(cleanupIncomingShareTransfer)
+    }
+
+    private func cleanupIncomingShareTransfer(requestID: String) {
+        guard let transfer = activeIncomingShareTransfers.removeValue(forKey: requestID) else { return }
+        try? transfer.close()
+        try? FileManager.default.removeItem(at: transfer.temporaryFileURL)
+    }
+
+    private func downloadsDirectoryURL() throws -> URL {
+        guard let downloadsDirectory = FileManager.default.urls(
+            for: .downloadsDirectory,
+            in: .userDomainMask
+        ).first else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return downloadsDirectory
+    }
+
+    private func uniqueDestinationURL(in directory: URL, preferredName: String) -> URL {
+        let candidateURL = directory.appendingPathComponent(preferredName)
+        guard FileManager.default.fileExists(atPath: candidateURL.path) else {
+            return candidateURL
+        }
+
+        let baseName = candidateURL.deletingPathExtension().lastPathComponent
+        let fileExtension = candidateURL.pathExtension
+        var copyIndex = 2
+
+        while true {
+            let suffix = " \(copyIndex)"
+            let filename = fileExtension.isEmpty
+                ? baseName + suffix
+                : baseName + suffix + "." + fileExtension
+            let deduplicatedURL = directory.appendingPathComponent(filename)
+            if !FileManager.default.fileExists(atPath: deduplicatedURL.path) {
+                return deduplicatedURL
+            }
+            copyIndex += 1
+        }
+    }
+
+    private func copyFileURLToClipboard(_ fileURL: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([fileURL as NSURL])
+    }
+
+    private func sanitizedFilename(_ filename: String) -> String {
+        let trimmed = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = trimmed.isEmpty ? "Shared File" : trimmed
+        let disallowed = CharacterSet(charactersIn: "/:")
+        let components = fallback.components(separatedBy: disallowed).filter { !$0.isEmpty }
+        return components.isEmpty ? "Shared File" : components.joined(separator: "-")
+    }
+
     private func normalizedExtension(for file: PhoneFileItem) -> String {
         URL(fileURLWithPath: file.filename).pathExtension.lowercased()
     }
@@ -866,7 +1172,6 @@ final class PhoneBridgeController: ObservableObject {
             $0.id == deviceId && $0.publicKeyBase64 == remotePublicKeyBase64
         }
     }
-
 }
 
 private struct ActiveFileTransfer {
@@ -886,12 +1191,75 @@ private struct ActivePairing {
     let serviceName: String
 }
 
-enum PhoneBridgeControllerError: Error {
+private struct OutgoingShareFile {
+    let requestID: String
+    let sourceURL: URL
+    let filename: String
+    let mimeType: String
+}
+
+private struct IncomingShareTransfer {
+    let requestID: String
+    let filename: String
+    let mimeType: String
+    let temporaryFileURL: URL
+    private let handle: FileHandle
+    var nextChunkIndex = 0
+
+    init(requestID: String, filename: String, mimeType: String) throws {
+        self.requestID = requestID
+        self.filename = filename
+        self.mimeType = mimeType
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ToolkitIncomingShares", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporaryFileURL = directory.appendingPathComponent(UUID().uuidString)
+        FileManager.default.createFile(atPath: temporaryFileURL.path, contents: nil)
+        self.temporaryFileURL = temporaryFileURL
+        self.handle = try FileHandle(forWritingTo: temporaryFileURL)
+    }
+
+    func write(_ data: Data) throws {
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+    }
+
+    func close() throws {
+        try handle.close()
+    }
+}
+
+enum PhoneBridgeControllerError: LocalizedError {
     case invalidPairingResponse
     case invalidFrameSize
     case invalidJSON
     case connectionClosed
     case noActiveConnection
     case invalidFileTransferResponse
+    case invalidShareTransferResponse
     case remoteFileTransferFailed(String)
+    case unsupportedShareSource(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidPairingResponse:
+            return "Toolkit received an invalid pairing response."
+        case .invalidFrameSize:
+            return "Toolkit received an invalid bridge frame."
+        case .invalidJSON:
+            return "Toolkit received malformed bridge data."
+        case .connectionClosed:
+            return "The phone bridge connection closed."
+        case .noActiveConnection:
+            return "Connect Toolkit to your Android phone before sharing files."
+        case .invalidFileTransferResponse:
+            return "Toolkit received an invalid file transfer response."
+        case .invalidShareTransferResponse:
+            return "Toolkit received an invalid shared file transfer."
+        case .remoteFileTransferFailed(let message):
+            return message
+        case .unsupportedShareSource(let name):
+            return "\(name) is not a regular file."
+        }
+    }
 }

@@ -4,13 +4,14 @@
 - This is a personal macOS toolkit app.
 - Features are added for personal day-to-day utility.
 - The app contains multiple unrelated utilities bundled into one app.
+- The phone integration companion app lives in the `/Users/teja2495/Projects/my-toolkit-android` repo.
 
 ## Non-Negotiables
 - Never run `git add` or `git commit` commands.
 - Follow existing architecture, folder structure, and UI patterns already present in the repo.
 - Keep features independent. Avoid cross-feature coupling unless there is a strong reason.
 - After every completed code-related task (skip documentation-only tasks), run this from repo root:
-  `xcodebuild -project /Users/teja2495/Projects/my-toolkit-mac/Toolkit.xcodeproj -scheme Toolkit -configuration Debug -derivedDataPath /tmp/toolkit-build build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)"; test ${pipestatus[1]} = 0 && { open -n "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app"; }`
+  `pkill -f "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app/Contents/MacOS/Toolkit Debug" 2>/dev/null; xcodebuild -project /Users/teja2495/Projects/my-toolkit-mac/Toolkit.xcodeproj -scheme Toolkit -configuration Debug -derivedDataPath /tmp/toolkit-build build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)"; test ${pipestatus[1]} = 0 && { open -n "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app"; }`
 
 ## Feature Organization
 - Put standalone utilities in `Toolkit/Features/<FeatureName>/`.
