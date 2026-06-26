@@ -3,6 +3,7 @@ import Foundation
 final class PhoneBridgeStore {
     private let trustedDevicesKey = "phoneIntegration.trustedDevices"
     private let deviceIdKey = "phoneIntegration.deviceId"
+    private let identityKeyKey = "phoneIntegration.identityKey"
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -41,6 +42,18 @@ final class PhoneBridgeStore {
         if let data = try? JSONEncoder().encode(devices) {
             defaults.set(data, forKey: trustedDevicesKey)
         }
+    }
+
+    func identityKeyData() -> Data? {
+        defaults.data(forKey: identityKeyKey)
+    }
+
+    func saveIdentityKeyData(_ data: Data) {
+        defaults.set(data, forKey: identityKeyKey)
+    }
+
+    func removeIdentityKeyData() {
+        defaults.removeObject(forKey: identityKeyKey)
     }
 }
 

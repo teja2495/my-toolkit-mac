@@ -12,6 +12,8 @@ enum PhoneBridgeProtocol {
     static let error = "error"
     static let listFiles = "files.list"
     static let listFilesResult = "files.list.result"
+    static let readFile = "file.read"
+    static let readFileResult = "file.read.result"
 }
 
 struct PhoneTrustedDevice: Identifiable, Codable, Equatable {
@@ -26,6 +28,7 @@ struct DiscoveredPhoneDevice: Identifiable, Equatable {
     let id: String
     let name: String
     let endpoint: NWEndpoint
+    let advertisedDeviceId: String?
 }
 
 struct PendingPhonePairing: Identifiable, Equatable {
@@ -59,13 +62,17 @@ enum PhoneFileCategory: String, CaseIterable, Identifiable {
     case music
     case other
 
+    static var allCases: [PhoneFileCategory] {
+        [.photosVideos, .documents]
+    }
+
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .photosVideos: return "Photos & Videos"
-        case .documents: return "Documents"
-        case .music: return "Music"
+        case .documents: return "Other"
+        case .music: return "Audio"
         case .other: return "Other"
         }
     }

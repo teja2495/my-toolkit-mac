@@ -1,17 +1,24 @@
 import CryptoKit
 import Foundation
-import Security
 
 final class PhoneBridgeCrypto {
-    private let keychainService = "com.tk.toolkit.phone-bridge"
-    private let identityAccount = "identity-key-v1"
+    private let store: PhoneBridgeStore
+
+    init(store: PhoneBridgeStore = PhoneBridgeStore()) {
+        self.store = store
+    }
 
     func getOrCreateIdentityKey() throws -> P256.KeyAgreement.PrivateKey {
-        if let data = loadKeychainData(account: identityAccount) {
-            return try P256.KeyAgreement.PrivateKey(rawRepresentation: data)
+        if let data = store.identityKeyData() {
+            do {
+                return try P256.KeyAgreement.PrivateKey(rawRepresentation: data)
+            } catch {
+                store.removeIdentityKeyData()
+            }
         }
         let key = P256.KeyAgreement.PrivateKey()
-        try saveKeychainData(key.rawRepresentation, account: identityAccount)
+        // TODO: Move this pairing identity back to Keychain with non-interactive access once the feature is finalized.
+        store.saveIdentityKeyData(key.rawRepresentation)
         return key
     }
 
@@ -61,39 +68,9 @@ final class PhoneBridgeCrypto {
         let box = try AES.GCM.SealedBox(combined: ciphertext)
         return try AES.GCM.open(box, using: key)
     }
-
-    private func loadKeychainData(account: String) -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else { return nil }
-        return item as? Data
-    }
-
-    private func saveKeychainData(_ data: Data, account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
-        var item = query
-        item[kSecValueData as String] = data
-        let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw PhoneBridgeCryptoError.keychainSaveFailed(status)
-        }
-    }
 }
 
 enum PhoneBridgeCryptoError: Error {
     case invalidPublicKey
     case encryptionFailed
-    case keychainSaveFailed(OSStatus)
 }
