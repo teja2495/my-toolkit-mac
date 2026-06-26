@@ -8,7 +8,10 @@ struct PhoneIntegrationSettingsView: View {
     @ObservedObject private var controller: PhoneBridgeController
     @State private var isShowingTrustedDevices = false
     @State private var isTargetedByFileDrop = false
+    @State private var isDraggingPhoneFileOut = false
     @State private var actionErrorMessage: String?
+    @State private var localMouseUpMonitor: Any?
+    @State private var globalMouseUpMonitor: Any?
     private let photoGridColumns = [
         GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 12, alignment: .top)
     ]
@@ -62,9 +65,18 @@ struct PhoneIntegrationSettingsView: View {
         }
         .onDrop(
             of: [UTType.fileURL],
-            isTargeted: $isTargetedByFileDrop,
-            perform: handleDroppedFiles(providers:)
+            delegate: PhoneTabDropDelegate(
+                isTargeted: $isTargetedByFileDrop,
+                isDraggingPhoneFileOut: $isDraggingPhoneFileOut,
+                handleDroppedFiles: handleDroppedFiles(providers:)
+            )
         )
+        .onAppear {
+            installDragResetMonitorsIfNeeded()
+        }
+        .onDisappear {
+            removeDragResetMonitors()
+        }
         .sheet(isPresented: $isShowingTrustedDevices) {
             trustedDevicesSheet
         }
@@ -430,6 +442,7 @@ struct PhoneIntegrationSettingsView: View {
     }
 
     private func dragItemProvider(for file: PhoneFileItem) -> NSItemProvider {
+        isDraggingPhoneFileOut = true
         let provider = NSItemProvider()
         provider.suggestedName = file.filename
         provider.registerDataRepresentation(
@@ -634,6 +647,31 @@ struct PhoneIntegrationSettingsView: View {
         }
         return fileURL
     }
+
+    private func installDragResetMonitorsIfNeeded() {
+        guard localMouseUpMonitor == nil, globalMouseUpMonitor == nil else { return }
+
+        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { event in
+            isDraggingPhoneFileOut = false
+            return event
+        }
+        globalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp]) { _ in
+            Task { @MainActor in
+                isDraggingPhoneFileOut = false
+            }
+        }
+    }
+
+    private func removeDragResetMonitors() {
+        if let localMouseUpMonitor {
+            NSEvent.removeMonitor(localMouseUpMonitor)
+            self.localMouseUpMonitor = nil
+        }
+        if let globalMouseUpMonitor {
+            NSEvent.removeMonitor(globalMouseUpMonitor)
+            self.globalMouseUpMonitor = nil
+        }
+    }
 }
 
 private struct PhoneFileThumbnailView: View {
@@ -685,6 +723,45 @@ private struct PhoneFileThumbnailView: View {
 
     private var placeholderIconName: String {
         file.mimeType.hasPrefix("video/") ? "film" : "photo"
+    }
+}
+
+private struct PhoneTabDropDelegate: DropDelegate {
+    @Binding var isTargeted: Bool
+    @Binding var isDraggingPhoneFileOut: Bool
+    let handleDroppedFiles: ([NSItemProvider]) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        let fileProviders = fileProviders(from: info)
+        let isValid = !fileProviders.isEmpty
+        if !isValid {
+            isTargeted = false
+        }
+        return isValid
+    }
+
+    func dropEntered(info: DropInfo) {
+        isTargeted = !fileProviders(from: info).isEmpty
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer { isTargeted = false }
+        let fileProviders = fileProviders(from: info)
+        guard !fileProviders.isEmpty else { return false }
+        return handleDroppedFiles(fileProviders)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        fileProviders(from: info).isEmpty ? DropProposal(operation: .forbidden) : DropProposal(operation: .copy)
+    }
+
+    private func fileProviders(from info: DropInfo) -> [NSItemProvider] {
+        guard !isDraggingPhoneFileOut else { return [] }
+        return info.itemProviders(for: [UTType.fileURL])
     }
 }
 
