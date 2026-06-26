@@ -7,6 +7,7 @@ struct PhoneIntegrationSettingsView: View {
     @ObservedObject var bootstrapper: AppBootstrapper
     @ObservedObject private var controller: PhoneBridgeController
     @State private var isShowingTrustedDevices = false
+    @State private var isTargetedByFileDrop = false
     @State private var actionErrorMessage: String?
     private let photoGridColumns = [
         GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 12, alignment: .top)
@@ -35,6 +36,35 @@ struct PhoneIntegrationSettingsView: View {
         .padding(.bottom, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .scrollContentBackground(.hidden)
+        .overlay {
+            if isTargetedByFileDrop {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.08))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
+                    }
+                    .overlay {
+                        VStack(spacing: 8) {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                            Text("Drop files to send them to Android Downloads")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .padding(.horizontal, 36)
+                    .padding(.top, 32)
+                    .padding(.bottom, 28)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(
+            of: [UTType.fileURL],
+            isTargeted: $isTargetedByFileDrop,
+            perform: handleDroppedFiles(providers:)
+        )
         .sheet(isPresented: $isShowingTrustedDevices) {
             trustedDevicesSheet
         }
@@ -315,7 +345,7 @@ struct PhoneIntegrationSettingsView: View {
 
     private func fileListItem(for file: PhoneFileItem) -> some View {
         Button {
-            openInPreview(file)
+            openFile(file)
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: iconName(for: file))
@@ -345,7 +375,7 @@ struct PhoneIntegrationSettingsView: View {
 
     private func photoGridItem(for file: PhoneFileItem) -> some View {
         Button {
-            openInPreview(file)
+            openFile(file)
         } label: {
             ZStack(alignment: .topTrailing) {
                 PhoneFileThumbnailView(file: file)
@@ -371,9 +401,14 @@ struct PhoneIntegrationSettingsView: View {
         }
     }
 
-    private func openInPreview(_ file: PhoneFileItem) {
+    private func openFile(_ file: PhoneFileItem) {
         withResolvedLocalFileURL(for: file) { fileURL in
             let workspace = NSWorkspace.shared
+            if file.mimeType.hasPrefix("video/") || file.mimeType.hasPrefix("audio/") {
+                workspace.open(fileURL)
+                return
+            }
+
             let configuration = NSWorkspace.OpenConfiguration()
             if let previewURL = workspace.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
                 workspace.open([fileURL], withApplicationAt: previewURL, configuration: configuration) { _, _ in }
@@ -534,6 +569,70 @@ struct PhoneIntegrationSettingsView: View {
             return "doc.richtext"
         }
         return "doc"
+    }
+
+    private func handleDroppedFiles(providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !fileProviders.isEmpty else { return false }
+
+        resolveDroppedFileURLs(from: fileProviders)
+        return true
+    }
+
+    private func resolveDroppedFileURLs(from providers: [NSItemProvider]) {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var resolvedURLs: [URL] = []
+        var firstError: Error?
+
+        for provider in providers {
+            group.enter()
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, error in
+                defer { group.leave() }
+
+                if let error {
+                    lock.lock()
+                    if firstError == nil {
+                        firstError = error
+                    }
+                    lock.unlock()
+                    return
+                }
+
+                guard let fileURL = fileURL(from: data) else {
+                    return
+                }
+
+                lock.lock()
+                resolvedURLs.append(fileURL)
+                lock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            let uniqueURLs = Array(Set(resolvedURLs)).sorted { $0.path < $1.path }
+            if !uniqueURLs.isEmpty {
+                controller.queueFilesForRemoteShare(uniqueURLs)
+            } else if let firstError {
+                actionErrorMessage = firstError.localizedDescription
+            }
+        }
+    }
+
+    private func fileURL(from data: Data?) -> URL? {
+        guard let data else { return nil }
+        if let fileURL = URL(dataRepresentation: data, relativeTo: nil), fileURL.isFileURL {
+            return fileURL
+        }
+        guard let rawValue = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              let fileURL = URL(string: rawValue),
+              fileURL.isFileURL else {
+            return nil
+        }
+        return fileURL
     }
 }
 

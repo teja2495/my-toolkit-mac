@@ -23,17 +23,11 @@
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionAttributes</key>
-		<dict>
-			<key>NSExtensionActivationRule</key>
-			<dict>
-				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
-				<integer>20</integer>
-			</dict>
-		</dict>
+		<dict/>
 		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.share-services</string>
+		<string>com.apple.FinderSync</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>$(PRODUCT_MODULE_NAME).ShareRequestHandler</string>
+		<string>$(PRODUCT_MODULE_NAME).FinderSync</string>
 	</dict>
 </dict>
 </plist>
