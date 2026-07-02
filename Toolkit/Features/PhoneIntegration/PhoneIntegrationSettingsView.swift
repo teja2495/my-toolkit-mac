@@ -7,6 +7,8 @@ struct PhoneIntegrationSettingsView: View {
     @ObservedObject var bootstrapper: AppBootstrapper
     @ObservedObject private var controller: PhoneBridgeController
     @State private var isShowingTrustedDevices = false
+    @State private var isConnectionCardExpanded = true
+    @State private var lastAutoCollapseConnectionState: Bool?
     @State private var isTargetedByFileDrop = false
     @State private var isDraggingPhoneFileOut = false
     @State private var actionErrorMessage: String?
@@ -15,16 +17,15 @@ struct PhoneIntegrationSettingsView: View {
     private let photoGridColumns = [
         GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 12, alignment: .top)
     ]
+    private let otherGridColumns = [
+        GridItem(.adaptive(minimum: 156, maximum: 212), spacing: 14, alignment: .top)
+    ]
     private let byteCountFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter
     }()
-
-    private var feature: FeatureDescriptor? {
-        bootstrapper.availableFeatures.first(where: { $0.id == "phone-integration" })
-    }
 
     init(bootstrapper: AppBootstrapper) {
         self.bootstrapper = bootstrapper
@@ -76,6 +77,10 @@ struct PhoneIntegrationSettingsView: View {
         )
         .onAppear {
             installDragResetMonitorsIfNeeded()
+            syncConnectionCardExpansion(forceInitial: true)
+        }
+        .onChange(of: isCurrentlyConnected) { _ in
+            syncConnectionCardExpansion(forceInitial: false)
         }
         .onDisappear {
             removeDragResetMonitors()
@@ -100,88 +105,104 @@ struct PhoneIntegrationSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private var featureToggle: some View {
-        if let feature {
-            FeatureEnableToggle(
-                isOn: feature.isEnabled,
-                disabled: false
-            ) {
-                bootstrapper.toggleFeature(id: feature.id)
-            }
-        }
-    }
-
     private var connectionCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 14) {
-                SettingsRow("Phone") {
-                    featureToggle
-                }
+                VStack(alignment: .leading, spacing: 14) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            isConnectionCardExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(isCurrentlyConnected ? .green : .secondary)
+                                .frame(width: 24)
 
-                Divider()
+                            Text(connectionTitle)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.primary)
 
-                HStack(spacing: 12) {
-                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.green)
-                        .frame(width: 24)
+                            Spacer()
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(connectionTitle)
-                            .font(.system(size: 13, weight: .medium))
+                            Image(systemName: isConnectionCardExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
-                    Spacer()
+                    if isConnectionCardExpanded {
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 10) {
+                                    Button("Trusted Devices") {
+                                        isShowingTrustedDevices = true
+                                    }
+                                    .controlSize(.small)
 
-                    Button("Trusted Devices") {
-                        isShowingTrustedDevices = true
-                    }
-                    .controlSize(.small)
+                                    Button("Refresh") {
+                                        controller.stop()
+                                        controller.start()
+                                    }
+                                    .controlSize(.small)
 
-                    Button("Refresh") {
-                        controller.stop()
-                        controller.start()
-                    }
-                    .controlSize(.small)
-                }
-
-                if controller.discoveredDevices.isEmpty {
-                    if !isCurrentlyConnected {
-                        Text("No Android phones found on the local network.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(controller.discoveredDevices) { device in
-                            HStack(spacing: 12) {
-                                Image(systemName: "smartphone")
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 18)
-                                Text(availableDeviceLabel(for: device))
-                                    .font(.system(size: 13))
-                                Button(controller.isTrustedDiscoveredDevice(device) ? "Connect" : "Pair") {
-                                    controller.pair(with: device)
+                                    if isCurrentlyConnected {
+                                        Button("Disconnect") {
+                                            controller.disconnect()
+                                        }
+                                        .controlSize(.small)
+                                    }
                                 }
-                                .controlSize(.small)
-                                Spacer()
+
+                                if controller.discoveredDevices.isEmpty {
+                                    if !isCurrentlyConnected {
+                                        Text("No Android phones found on the local network.")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Available devices")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+
+                                        ForEach(controller.discoveredDevices) { device in
+                                            HStack(spacing: 12) {
+                                                Image(systemName: "smartphone")
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(width: 18)
+                                                Text(availableDeviceLabel(for: device))
+                                                    .font(.system(size: 13))
+                                                Button(controller.isTrustedDiscoveredDevice(device) ? "Connect" : "Pair") {
+                                                    controller.pair(with: device)
+                                                }
+                                                .controlSize(.small)
+                                                Spacer()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if let footerStatusMessage {
+                                    Text(footerStatusMessage)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+
+                            Spacer()
+                        }
+
+                        Divider()
+
+                        SettingsRow("Sync Mac clipboard to phone") {
+                            Toggle("", isOn: $bootstrapper.phoneClipboardSyncEnabled)
+                                .labelsHidden()
                         }
                     }
-                }
-
-                if let footerStatusMessage {
-                    Text(footerStatusMessage)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                SettingsRow("Sync Mac clipboard to phone") {
-                    Toggle("", isOn: $bootstrapper.phoneClipboardSyncEnabled)
-                        .labelsHidden()
                 }
             }
         }
@@ -273,8 +294,10 @@ struct PhoneIntegrationSettingsView: View {
         switch controller.connectionState {
         case .connected(let name):
             return "Connected to \(name)"
+        case .error(let message):
+            return message
         default:
-            return controller.connectionState.label
+            return "Ready to Connect"
         }
     }
 
@@ -283,6 +306,18 @@ struct PhoneIntegrationSettingsView: View {
         guard !message.isEmpty else { return nil }
         guard message != connectionTitle else { return nil }
         return message
+    }
+
+    private func syncConnectionCardExpansion(forceInitial: Bool) {
+        let connected = isCurrentlyConnected
+        if forceInitial {
+            guard lastAutoCollapseConnectionState == nil else { return }
+        } else if lastAutoCollapseConnectionState == connected {
+            return
+        }
+
+        isConnectionCardExpanded = !connected
+        lastAutoCollapseConnectionState = connected
     }
 
     private var fileBrowserCard: some View {
@@ -330,22 +365,16 @@ struct PhoneIntegrationSettingsView: View {
                     .padding(.vertical, 24)
                 } else {
                     ScrollView {
-                        if controller.selectedCategory == .photosVideos {
-                            LazyVGrid(columns: photoGridColumns, alignment: .leading, spacing: 12) {
-                                ForEach(filteredFiles) { file in
+                        LazyVGrid(
+                            columns: controller.selectedCategory == .photosVideos ? photoGridColumns : otherGridColumns,
+                            alignment: .leading,
+                            spacing: controller.selectedCategory == .photosVideos ? 12 : 14
+                        ) {
+                            ForEach(filteredFiles) { file in
+                                if controller.selectedCategory == .photosVideos {
                                     photoGridItem(for: file)
-                                }
-                            }
-                        } else {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(filteredFiles.enumerated()), id: \.element.id) { index, file in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        fileListItem(for: file)
-                                            .padding(.vertical, 10)
-                                        if index < filteredFiles.count - 1 {
-                                            Divider()
-                                        }
-                                    }
+                                } else {
+                                    otherGridItem(for: file)
                                 }
                             }
                         }
@@ -429,6 +458,39 @@ struct PhoneIntegrationSettingsView: View {
                         .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
                         .padding(8)
                 }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onDrag {
+            dragItemProvider(for: file)
+        }
+        .contextMenu {
+            fileContextMenu(for: file)
+        }
+    }
+
+    private func otherGridItem(for file: PhoneFileItem) -> some View {
+        Button {
+            openFile(file)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                PhoneFileThumbnailView(file: file)
+                    .frame(height: 132)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(file.filename)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    Text(fileMetadataText(for: file))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
         }
@@ -707,7 +769,7 @@ private struct PhoneFileThumbnailView: View {
 
     var body: some View {
         ZStack {
-            if let thumbnail = thumbnailImage {
+            if let thumbnail = thumbnailImage, !shouldPreferPDFPlaceholder {
                 GeometryReader { geometry in
                     Image(nsImage: thumbnail)
                         .resizable()
@@ -726,9 +788,13 @@ private struct PhoneFileThumbnailView: View {
                 Rectangle()
                     .fill(Color.primary.opacity(0.08))
                     .overlay {
-                        Image(systemName: placeholderIconName)
-                            .font(.system(size: 28, weight: .medium))
-                            .foregroundStyle(.secondary)
+                        if shouldPreferPDFPlaceholder {
+                            pdfPlaceholderView
+                        } else {
+                            Image(systemName: placeholderIconName)
+                                .font(.system(size: 28, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
                     }
             }
         }
@@ -749,8 +815,45 @@ private struct PhoneFileThumbnailView: View {
         return NSImage(cgImage: cgImage, size: .zero)
     }
 
+    private var shouldPreferPDFPlaceholder: Bool {
+        file.mimeType == "application/pdf"
+    }
+
+    private var pdfPlaceholderView: some View {
+        VStack(spacing: 3) {
+            ZStack {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 34, weight: .medium))
+                    .foregroundStyle(.white)
+
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(red: 0.88, green: 0.22, blue: 0.19))
+                    .frame(width: 24, height: 12)
+                    .offset(y: 9)
+
+                Text("PDF")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.white)
+                    .offset(y: 9)
+            }
+            .shadow(color: .black.opacity(0.12), radius: 1, x: 0, y: 1)
+        }
+    }
+
     private var placeholderIconName: String {
-        file.mimeType.hasPrefix("video/") ? "film" : "photo"
+        if file.mimeType.hasPrefix("video/") {
+            return "film"
+        }
+        if file.mimeType.hasPrefix("image/") {
+            return "photo"
+        }
+        if file.mimeType.hasPrefix("audio/") {
+            return "music.note"
+        }
+        if file.mimeType == "application/pdf" {
+            return "doc.richtext"
+        }
+        return "doc"
     }
 }
 

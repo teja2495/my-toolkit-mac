@@ -56,6 +56,7 @@ final class PhoneBridgeController: ObservableObject {
     private var connectedServiceName: String?
     private var fileRequestRetryTask: Task<Void, Never>?
     private var reconnectingServiceNames: Set<String> = []
+    private var manuallyDisconnectedServiceName: String?
     private var cachedFileItemsByCategory: [PhoneFileCategory: [PhoneFileItem]] = [:]
     private var queuedFileCategories: [PhoneFileCategory] = []
     private var activeFileRequestCategory: PhoneFileCategory?
@@ -148,6 +149,7 @@ final class PhoneBridgeController: ObservableObject {
         transferStatusMessage = ""
         isLoadingFiles = false
         connectedServiceName = nil
+        manuallyDisconnectedServiceName = nil
         allDiscoveredDevices = []
         discoveredDevices = []
         reconnectingServiceNames = []
@@ -177,6 +179,7 @@ final class PhoneBridgeController: ObservableObject {
         logger.debug("Pair requested for service=\(device.name, privacy: .public)")
         activePairing?.connection.cancel()
         pendingPairing = nil
+        manuallyDisconnectedServiceName = nil
         connectionState = .pairing
 
         let connection = NWConnection(to: device.endpoint, using: .tcp)
@@ -239,7 +242,58 @@ final class PhoneBridgeController: ObservableObject {
         store.removeTrustedDevice(id: id)
         trustedDevices = store.trustedDevices()
         reconnectingServiceNames.removeAll()
+
+        if let activePairing, activePairing.deviceId == id {
+            logger.debug("Removing trusted device for active connection deviceId=\(id, privacy: .public); disconnecting")
+            disconnect()
+            return
+        }
+
+        if let pendingPairing, pendingPairing.deviceId == id {
+            logger.debug("Removing trusted device for pending connection deviceId=\(id, privacy: .public); cancelling")
+            activePairing?.connection.cancel()
+            activePairing = nil
+            self.pendingPairing = nil
+            connectedServiceName = nil
+            fileRequestRetryTask?.cancel()
+            fileRequestRetryTask = nil
+            fileItems = []
+            cachedFileItemsByCategory = [:]
+            queuedFileCategories = []
+            activeFileRequestCategory = nil
+            activeFileTransfers = [:]
+            isLoadingFiles = false
+            fileBrowserMessage = "Pair and connect to an Android phone to browse files."
+            transferStatusMessage = ""
+            refreshDiscoveredDevices()
+            connectionState = browser == nil ? .idle : .browsing
+            return
+        }
+
         attemptAutoReconnectIfPossible()
+    }
+
+    func disconnect() {
+        guard let activePairing else { return }
+        logger.debug("Manually disconnecting from service=\(activePairing.serviceName, privacy: .public)")
+        manuallyDisconnectedServiceName = activePairing.serviceName
+        reconnectingServiceNames.remove(activePairing.serviceName)
+        activePairing.connection.cancel()
+        self.activePairing = nil
+        pendingPairing = nil
+        connectedServiceName = nil
+        fileRequestRetryTask?.cancel()
+        fileRequestRetryTask = nil
+        fileItems = []
+        cachedFileItemsByCategory = [:]
+        queuedFileCategories = []
+        activeFileRequestCategory = nil
+        activeFileTransfers = [:]
+        isLoadingFiles = false
+        fileBrowserMessage = "Pair and connect to an Android phone to browse files."
+        transferStatusMessage = ""
+        refreshDiscoveredDevices()
+        connectionState = browser == nil ? .idle : .browsing
     }
 
     func refreshFiles() {
@@ -582,11 +636,6 @@ final class PhoneBridgeController: ObservableObject {
         let didWrite = pasteboard.setString(text, forType: .string)
         lastSyncedClipboardText = text
         lastObservedClipboardChangeCount = pasteboard.changeCount
-        if didWrite {
-            transferStatusMessage = "Updated Mac clipboard from \(pairing.deviceName)."
-        } else {
-            transferStatusMessage = "Toolkit could not update the Mac clipboard."
-        }
         sendEncrypted(
             [
                 "type": PhoneBridgeProtocol.setClipboardResult,
@@ -600,10 +649,8 @@ final class PhoneBridgeController: ObservableObject {
 
     private func handleSetClipboardResult(_ json: [String: Any]) {
         guard let success = json["success"] as? Bool else { return }
-        if success {
-            transferStatusMessage = (json["message"] as? String) ?? "Updated Android clipboard."
-        } else {
-            transferStatusMessage = (json["message"] as? String) ?? "Toolkit could not update the Android clipboard."
+        if !success {
+            logger.error("Android clipboard update failed: \(String(describing: json["message"]))")
         }
     }
 
@@ -1272,7 +1319,9 @@ final class PhoneBridgeController: ObservableObject {
         guard !trustedDeviceIds.isEmpty || !trustedNames.isEmpty else { return }
 
         guard let trustedDevice = allDiscoveredDevices.first(where: {
-            !reconnectingServiceNames.contains($0.name) && (
+            !reconnectingServiceNames.contains($0.name) &&
+            manuallyDisconnectedServiceName != $0.name &&
+            (
                 ($0.advertisedDeviceId.map { trustedDeviceIds.contains($0) } ?? false) ||
                 trustedNames.contains($0.name)
             )
