@@ -14,6 +14,13 @@ struct VSCodeFolderShortcut: Identifiable, Codable, Equatable {
 
 @MainActor
 final class AppBootstrapper: ObservableObject {
+    @Published var mediaControlsHoverDelay: Double {
+        didSet {
+            UserDefaults.standard.set(mediaControlsHoverDelay, forKey: Self.mediaControlsHoverDelayKey)
+            (liveFeatures["media-controls"] as? MediaControlsFeature)?.hoverDelay = max(0, mediaControlsHoverDelay)
+        }
+    }
+
     @Published var dockHoverPopupDelay: Double {
         didSet {
             UserDefaults.standard.set(dockHoverPopupDelay, forKey: Self.dockHoverPopupDelayKey)
@@ -147,7 +154,9 @@ final class AppBootstrapper: ObservableObject {
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
+    private static let mediaControlsHoverDelayKey = "mediaControlsHoverDelay"
     private static let dockHoverPopupDelayKey = "dockHoverPopupDelay"
+    private static let defaultMediaControlsHoverDelay = 0.0
     private static let defaultDockHoverPopupDelay = 2.0
     private static let legacyDockHoverPopupDelay = 0.25
     private static let writingFixRulesKey = "writingFixRules"
@@ -163,6 +172,7 @@ final class AppBootstrapper: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     init() {
+        mediaControlsHoverDelay = UserDefaults.standard.object(forKey: Self.mediaControlsHoverDelayKey) as? Double ?? Self.defaultMediaControlsHoverDelay
         let savedDelay = UserDefaults.standard.object(forKey: Self.dockHoverPopupDelayKey) as? Double
         let resolvedDelay: Double
         if let savedDelay, abs(savedDelay - Self.legacyDockHoverPopupDelay) < 0.001 {
@@ -243,7 +253,9 @@ final class AppBootstrapper: ObservableObject {
     private func updateFeatureLifecycle() {
         ensureFeatureExists(CornerNotesFeature())
         ensureFeatureExists(SystemHealthFeature())
-        ensureFeatureExists(MediaControlsFeature())
+        let mediaControlsFeature = MediaControlsFeature()
+        mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)
+        ensureFeatureExists(mediaControlsFeature)
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
 
@@ -283,6 +295,9 @@ final class AppBootstrapper: ObservableObject {
                 dockFeature.popupDelay = max(0, dockHoverPopupDelay)
                 dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
             }
+            if let mediaControlsFeature = liveFeatures[feature.id] as? MediaControlsFeature {
+                mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)
+            }
             if let writingFixFeature = liveFeatures[feature.id] as? WritingFixFeature {
                 writingFixFeature.rules = writingFixRules
             }
@@ -298,6 +313,9 @@ final class AppBootstrapper: ObservableObject {
         if let dockFeature = feature as? DockWindowHoverFeature {
             dockFeature.popupDelay = max(0, dockHoverPopupDelay)
             dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
+        }
+        if let mediaControlsFeature = feature as? MediaControlsFeature {
+            mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)
         }
         if let writingFixFeature = feature as? WritingFixFeature {
             writingFixFeature.rules = writingFixRules

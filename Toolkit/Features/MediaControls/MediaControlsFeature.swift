@@ -39,6 +39,7 @@ private final class HoverTrackingHostingView<Content: View>: NSHostingView<Conte
 @MainActor
 final class MediaControlsFeature: NSObject, AppFeature {
     let id = "media-controls"
+    var hoverDelay: TimeInterval = 0
 
     private let client = MediaRemoteClient()
     private lazy var model = MediaControlsModel(client: client)
@@ -56,6 +57,8 @@ final class MediaControlsFeature: NSObject, AppFeature {
     private var isNotchHovered = false
     private var isPanelHovered = false
     private var currentHoverScreen: NSScreen?
+    private var pendingHoverScreen: NSScreen?
+    private var pendingHoverStartDate: Date?
 
     private let panelTopOffset: CGFloat = 32
     func start() {
@@ -101,6 +104,8 @@ final class MediaControlsFeature: NSObject, AppFeature {
         removeAllMenuBarPanels()
         isNotchHovered = false
         currentHoverScreen = nil
+        pendingHoverScreen = nil
+        pendingHoverStartDate = nil
     }
 
     private func installObservers() {
@@ -332,7 +337,19 @@ final class MediaControlsFeature: NSObject, AppFeature {
     }
 
     private func setNotchHovered(_ isHovered: Bool, screen: NSScreen?) {
-        currentHoverScreen = screen ?? currentHoverScreen
+        if isHovered {
+            let resolvedScreen = screen ?? currentHoverScreen
+            currentHoverScreen = resolvedScreen ?? currentHoverScreen
+
+            guard hasSatisfiedHoverDelay(for: resolvedScreen) else { return }
+            pendingHoverScreen = nil
+            pendingHoverStartDate = nil
+        } else {
+            pendingHoverScreen = nil
+            pendingHoverStartDate = nil
+            currentHoverScreen = screen ?? currentHoverScreen
+        }
+
         guard isNotchHovered != isHovered else { return }
 
         isNotchHovered = isHovered
@@ -346,6 +363,19 @@ final class MediaControlsFeature: NSObject, AppFeature {
         } else {
             scheduleCloseIfNeeded()
         }
+    }
+
+    private func hasSatisfiedHoverDelay(for screen: NSScreen?) -> Bool {
+        guard hoverDelay > 0 else { return true }
+
+        if pendingHoverScreen !== screen {
+            pendingHoverScreen = screen
+            pendingHoverStartDate = Date()
+            return false
+        }
+
+        guard let pendingHoverStartDate else { return false }
+        return Date().timeIntervalSince(pendingHoverStartDate) >= hoverDelay
     }
 
     private func startNotchHoverPolling() {
