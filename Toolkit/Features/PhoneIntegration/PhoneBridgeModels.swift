@@ -89,5 +89,20 @@ struct PhoneFileItem: Identifiable, Equatable {
     let size: Int64
     let modifiedDate: Date
     let mimeType: String
+    let isDirectory: Bool
     let thumbnailData: Data?
+}
+
+enum MacSharedFileCategory: String, CaseIterable {
+    case desktop = "mac_desktop"
+    case downloads = "mac_downloads"
+
+    var directory: FileManager.SearchPathDirectory {
+        switch self {
+        case .desktop:
+            return .desktopDirectory
+        case .downloads:
+            return .downloadsDirectory
+        }
+    }
 }

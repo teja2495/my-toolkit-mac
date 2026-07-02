@@ -1,7 +1,9 @@
 import AppKit
+import AVFoundation
 import Combine
 import CryptoKit
 import Foundation
+import ImageIO
 import Network
 import OSLog
 import UniformTypeIdentifiers
@@ -503,8 +505,12 @@ final class PhoneBridgeController: ObservableObject {
                         let count = (json["files"] as? [[String: Any]] ?? []).count
                         self.logger.debug("Received files.list.result from deviceId=\(pairing.deviceId, privacy: .public) count=\(count)")
                         self.handleListFilesResult(json)
+                    } else if messageType == PhoneBridgeProtocol.listFiles {
+                        self.handleIncomingListFilesRequest(json, pairing: pairing)
                     } else if messageType == PhoneBridgeProtocol.readFileResult {
                         self.handleReadFileResult(json)
+                    } else if messageType == PhoneBridgeProtocol.readFile {
+                        self.handleIncomingReadFileRequest(json, pairing: pairing)
                     } else if messageType == PhoneBridgeProtocol.shareFileChunk {
                         self.handleIncomingShareChunk(json, pairing: pairing)
                     } else if messageType == PhoneBridgeProtocol.shareFileResult {
@@ -735,6 +741,7 @@ final class PhoneBridgeController: ObservableObject {
                 size: sizeNumber.int64Value,
                 modifiedDate: Date(timeIntervalSince1970: modifiedNumber.doubleValue / 1000),
                 mimeType: mimeType,
+                isDirectory: item["isDirectory"] as? Bool ?? false,
                 thumbnailData: thumbnailData
             )
         }
@@ -963,6 +970,115 @@ final class PhoneBridgeController: ObservableObject {
             } catch {
                 finishFileTransfer(requestID: requestID, result: .failure(error))
             }
+        }
+    }
+
+    private func handleIncomingListFilesRequest(_ json: [String: Any], pairing: ActivePairing) {
+        guard let rawCategory = json["category"] as? String,
+              let category = MacSharedFileCategory(rawValue: rawCategory) else {
+            sendEncrypted(
+                [
+                    "type": PhoneBridgeProtocol.error,
+                    "message": "Toolkit received an unsupported Mac file category."
+                ],
+                pairing: pairing
+            )
+            return
+        }
+
+        let pageSize = (json["pageSize"] as? NSNumber)?.intValue ?? Self.maxFilesPerCategory
+        let pageToken = (json["pageToken"] as? NSNumber)?.intValue ?? 0
+        let requestedFolderURL = (json["documentUri"] as? String).flatMap(URL.init(string:))
+        let files = sharedFiles(
+            for: category,
+            folderURL: requestedFolderURL,
+            pageSize: pageSize,
+            pageToken: pageToken
+        )
+        let payloadFiles = files.map { file -> [String: Any] in
+            var payload: [String: Any] = [
+                "id": file.id,
+                "filename": file.filename,
+                "documentUri": file.documentURI,
+                "size": file.size,
+                "modifiedDate": Int64(file.modifiedDate.timeIntervalSince1970 * 1000),
+                "mimeType": file.mimeType,
+                "isDirectory": file.isDirectory
+            ]
+            if let thumbnailData = file.thumbnailData {
+                payload["thumbnail"] = thumbnailData.base64EncodedString()
+            }
+            return payload
+        }
+        sendEncrypted(
+            [
+                "type": PhoneBridgeProtocol.listFilesResult,
+                "category": category.rawValue,
+                "files": payloadFiles,
+                "nextPageToken": pageToken + payloadFiles.count
+            ],
+            pairing: pairing
+        )
+    }
+
+    private func handleIncomingReadFileRequest(_ json: [String: Any], pairing: ActivePairing) {
+        guard let requestID = json["requestId"] as? String, !requestID.isEmpty,
+              let documentURI = json["documentUri"] as? String, !documentURI.isEmpty else {
+            sendEncrypted(
+                [
+                    "type": PhoneBridgeProtocol.error,
+                    "message": "Missing Mac file request details."
+                ],
+                pairing: pairing
+            )
+            return
+        }
+
+        guard let fileURL = URL(string: documentURI),
+              fileURL.isFileURL,
+              isAllowedSharedFileURL(fileURL) else {
+            sendEncrypted(
+                [
+                    "type": PhoneBridgeProtocol.error,
+                    "requestId": requestID,
+                    "message": "Toolkit can only share files from Desktop or Downloads."
+                ],
+                pairing: pairing
+            )
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let chunks = stride(from: 0, to: max(data.count, 1), by: Self.maxShareChunkSizeBytes).map { offset -> Data in
+                if data.isEmpty {
+                    return Data()
+                }
+                let end = min(offset + Self.maxShareChunkSizeBytes, data.count)
+                return data.subdata(in: offset..<end)
+            }
+            let chunkPayloads = chunks.isEmpty ? [Data()] : chunks
+            for (index, chunk) in chunkPayloads.enumerated() {
+                sendEncrypted(
+                    [
+                        "type": PhoneBridgeProtocol.readFileResult,
+                        "requestId": requestID,
+                        "chunkIndex": index,
+                        "totalChunks": chunkPayloads.count,
+                        "data": chunk.base64EncodedString()
+                    ],
+                    pairing: pairing
+                )
+            }
+        } catch {
+            sendEncrypted(
+                [
+                    "type": PhoneBridgeProtocol.error,
+                    "requestId": requestID,
+                    "message": error.localizedDescription
+                ],
+                pairing: pairing
+            )
         }
     }
 
@@ -1295,6 +1411,123 @@ final class PhoneBridgeController: ObservableObject {
 
     private func normalizedExtension(for file: PhoneFileItem) -> String {
         URL(fileURLWithPath: file.filename).pathExtension.lowercased()
+    }
+
+    private func sharedFiles(
+        for category: MacSharedFileCategory,
+        folderURL: URL?,
+        pageSize: Int,
+        pageToken: Int
+    ) -> [PhoneFileItem] {
+        let rootDirectoryURL = FileManager.default.urls(for: category.directory, in: .userDomainMask).first?.standardizedFileURL
+        guard let rootDirectoryURL else { return [] }
+        let targetDirectoryURL = folderURL?.standardizedFileURL ?? rootDirectoryURL
+        guard isAllowedSharedFolderURL(targetDirectoryURL, rootDirectory: rootDirectoryURL) else { return [] }
+        let fileURLs = (try? FileManager.default.contentsOfDirectory(
+            at: targetDirectoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey, .isDirectoryKey, .typeIdentifierKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let offset = max(0, pageToken)
+        let limit = max(1, min(pageSize, 100))
+        return fileURLs
+            .filter { isAllowedSharedItemURL($0, rootDirectory: rootDirectoryURL) }
+            .compactMap { sharedFileItem(for: $0) }
+            .sorted { lhs, rhs in
+                if lhs.isDirectory != rhs.isDirectory {
+                    return lhs.isDirectory && !rhs.isDirectory
+                }
+                return lhs.modifiedDate > rhs.modifiedDate
+            }
+            .dropFirst(offset)
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private func sharedFileItem(for url: URL) -> PhoneFileItem? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey, .isDirectoryKey, .typeIdentifierKey]) else {
+            return nil
+        }
+        let isDirectory = values.isDirectory == true
+        guard isDirectory || values.isRegularFile == true else { return nil }
+        let type = values.typeIdentifier.flatMap(UTType.init) ?? UTType(filenameExtension: url.pathExtension)
+        let mimeType = isDirectory ? "inode/directory" : (type?.preferredMIMEType ?? "application/octet-stream")
+        return PhoneFileItem(
+            id: url.path,
+            filename: url.lastPathComponent,
+            documentURI: url.absoluteString,
+            size: Int64(isDirectory ? 0 : (values.fileSize ?? 0)),
+            modifiedDate: values.contentModificationDate ?? .distantPast,
+            mimeType: mimeType,
+            isDirectory: isDirectory,
+            thumbnailData: isDirectory ? nil : sharedFileThumbnailData(for: url, mimeType: mimeType)
+        )
+    }
+
+    private static let sharedThumbnailMaxPixel = 300
+    private static let sharedThumbnailJPEGQuality: CGFloat = 0.76
+
+    private func sharedFileThumbnailData(for url: URL, mimeType: String) -> Data? {
+        if mimeType.hasPrefix("image/") {
+            return imageThumbnailData(for: url)
+        }
+        if mimeType.hasPrefix("video/") {
+            return videoThumbnailData(for: url)
+        }
+        return nil
+    }
+
+    private func imageThumbnailData(for url: URL) -> Data? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Self.sharedThumbnailMaxPixel,
+            kCGImageSourceCreateThumbnailWithTransform: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return jpegThumbnailData(from: cgImage)
+    }
+
+    private func videoThumbnailData(for url: URL) -> Data? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: Self.sharedThumbnailMaxPixel, height: Self.sharedThumbnailMaxPixel)
+        guard let cgImage = try? generator.copyCGImage(at: .zero, actualTime: nil) else { return nil }
+        return jpegThumbnailData(from: cgImage)
+    }
+
+    private func jpegThumbnailData(from cgImage: CGImage) -> Data? {
+        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+        return bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: Self.sharedThumbnailJPEGQuality])
+    }
+
+    private func isAllowedSharedFileURL(_ url: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        guard let values = try? standardizedURL.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true else {
+            return false
+        }
+        let allowedDirectories = MacSharedFileCategory.allCases.compactMap {
+            FileManager.default.urls(for: $0.directory, in: .userDomainMask).first?.standardizedFileURL
+        }
+        return allowedDirectories.contains { rootDirectory in
+            standardizedURL.path == rootDirectory.path || standardizedURL.path.hasPrefix(rootDirectory.appendingPathComponent("").path)
+        }
+    }
+
+    private func isAllowedSharedFolderURL(_ url: URL, rootDirectory: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        guard let values = try? standardizedURL.resourceValues(forKeys: [.isDirectoryKey]),
+              values.isDirectory == true else {
+            return false
+        }
+        return standardizedURL.path == rootDirectory.path || standardizedURL.path.hasPrefix(rootDirectory.appendingPathComponent("").path)
+    }
+
+    private func isAllowedSharedItemURL(_ url: URL, rootDirectory: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        return standardizedURL.path.hasPrefix(rootDirectory.appendingPathComponent("").path) || standardizedURL.path == rootDirectory.path
     }
 
     private func isDocumentFile(_ file: PhoneFileItem) -> Bool {
