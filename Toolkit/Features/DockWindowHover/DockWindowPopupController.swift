@@ -398,11 +398,16 @@ final class DockWindowPopupController {
               let bundleURL = app.bundleURL else { return }
         _ = app.terminate()
         Task { @MainActor in
-            await waitForApplicationTransition {
+            let didTerminate = await waitForApplicationTransition(timeout: 10) {
                 app.isTerminated
             }
+            guard didTerminate else {
+                return
+            }
+
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = false
+            configuration.createsNewApplicationInstance = true
             NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, _ in }
             hide()
         }
@@ -419,12 +424,16 @@ final class DockWindowPopupController {
         }
     }
 
-    private func waitForApplicationTransition(condition: @escaping () -> Bool) async {
-        if condition() { return }
-        for _ in 0..<15 {
+    private func waitForApplicationTransition(
+        timeout: Int = 1,
+        condition: @escaping () -> Bool
+    ) async -> Bool {
+        if condition() { return true }
+        for _ in 0..<(timeout * 50) {
             try? await Task.sleep(nanoseconds: 20_000_000)
-            if condition() { return }
+            if condition() { return true }
         }
+        return false
     }
 
     private func frame(for size: CGSize, anchoredTo dockItemFrame: CGRect) -> CGRect {
