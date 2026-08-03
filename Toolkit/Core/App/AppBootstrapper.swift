@@ -164,6 +164,7 @@ final class AppBootstrapper: ObservableObject {
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
     private static let phoneClipboardSyncEnabledKey = "phoneClipboardSyncEnabled"
+    private static let featureEnabledKeyPrefix = "featureEnabled."
     private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -186,6 +187,7 @@ final class AppBootstrapper: ObservableObject {
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
+        restoreFeatureEnabledStates()
         if resolvedDelay != savedDelay {
             UserDefaults.standard.set(resolvedDelay, forKey: Self.dockHoverPopupDelayKey)
         }
@@ -210,6 +212,7 @@ final class AppBootstrapper: ObservableObject {
         guard let index = availableFeatures.firstIndex(where: { $0.id == id }) else { return }
         availableFeatures[index].isEnabled.toggle()
         let isEnabled = availableFeatures[index].isEnabled
+        UserDefaults.standard.set(isEnabled, forKey: Self.featureEnabledKey(for: id))
         if isEnabled {
             liveFeatures[id]?.start()
         } else {
@@ -327,6 +330,19 @@ final class AppBootstrapper: ObservableObject {
             phoneIntegrationFeature.controller.setClipboardSyncEnabled(phoneClipboardSyncEnabled)
         }
         liveFeatures[feature.id] = feature
+    }
+
+    private func restoreFeatureEnabledStates() {
+        for index in availableFeatures.indices {
+            let key = Self.featureEnabledKey(for: availableFeatures[index].id)
+            if let isEnabled = UserDefaults.standard.object(forKey: key) as? Bool {
+                availableFeatures[index].isEnabled = isEnabled
+            }
+        }
+    }
+
+    private static func featureEnabledKey(for id: String) -> String {
+        featureEnabledKeyPrefix + id
     }
 
     private static func loadTextExpanderEntries() -> [TextExpanderEntry] {
