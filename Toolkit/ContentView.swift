@@ -27,7 +27,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 480, ideal: 560)
         }
         .navigationSplitViewStyle(.balanced)
-        .containerBackground(.regularMaterial, for: .window)
+        .containerBackground(Color(nsColor: .windowBackgroundColor), for: .window)
         .onAppear {
             if selection == nil {
                 selection = defaultSelection
@@ -49,7 +49,7 @@ struct ContentView: View {
 private struct SidebarBackdrop: View {
     var body: some View {
         Color(nsColor: .windowBackgroundColor)
-            .opacity(0.92)
+            .overlay(Color.settingsSidebarBackground)
             .ignoresSafeArea()
     }
 }

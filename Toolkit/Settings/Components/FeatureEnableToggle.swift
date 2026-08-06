@@ -19,7 +19,7 @@ struct FeatureEnableToggle: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            .settingsSurface(Capsule(), emphasized: true)
         }
         .buttonStyle(.plain)
         .disabled(disabled)

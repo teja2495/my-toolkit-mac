@@ -116,7 +116,7 @@ struct DockWindowHoverSettingsView: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .settingsSurface(Capsule(), emphasized: true)
                         }
                         .buttonStyle(.plain)
                         .padding(.top, 2)
@@ -292,7 +292,10 @@ struct PermissionRequiredBanner: View {
             .tint(Color.orange)
         }
         .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.settingsSurface)
+            )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)

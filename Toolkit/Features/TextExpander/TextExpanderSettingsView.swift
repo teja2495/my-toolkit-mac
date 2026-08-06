@@ -68,7 +68,7 @@ struct TextExpanderSettingsView: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .settingsSurface(Capsule(), emphasized: true)
                         }
                         .buttonStyle(.plain)
                         .padding(.top, 4)
