@@ -22,6 +22,20 @@ final class WritingFixFeature: AppFeature {
     private var pollTimer: Timer?
     private var isFixing = false
 
+    private struct RewriteDisplay {
+        let originalText: String
+        let replacementRange: Range<String.Index>
+
+        func statusText(for text: String, failed: Bool = false) -> String {
+            let title = failed ? "Rewriting failed..." : "Rewriting..."
+            return originalText.replacingCharacters(in: replacementRange, with: "\(title)\n\(text)")
+        }
+
+        func completedText(with rewrittenText: String) -> String {
+            originalText.replacingCharacters(in: replacementRange, with: rewrittenText)
+        }
+    }
+
     func start() {
         guard pollTimer == nil else { return }
         keyboardBuffer.start()
@@ -69,22 +83,21 @@ final class WritingFixFeature: AppFeature {
         let hasSelection = selected.map { !$0.isEmpty } ?? false
 
         let textToFix: String
-        let useSelection: Bool
 
         if hasSelection, let sel = selected {
             textToFix = sel
-            useSelection = true
         } else if let input, let full = resolver.text(in: input), !full.isEmpty {
             textToFix = full
-            useSelection = false
         } else if let full = await resolver.focusedTextByCopying() {
             textToFix = full
-            useSelection = false
         } else {
             return
         }
 
         isFixing = true
+
+        let display = shortcutDisplay(for: input, selectedText: textToFix)
+        show(display.statusText(for: textToFix), in: input)
 
         do {
             let corrected = try await corrector.correctedText(
@@ -93,15 +106,9 @@ final class WritingFixFeature: AppFeature {
                 provider: rule.provider,
                 systemPrompt: systemPrompt
             )
-            if useSelection, let input {
-                _ = resolver.replaceSelectedText(in: input, with: corrected)
-            } else if let input {
-                _ = resolver.replaceText(in: input, with: corrected)
-            } else {
-                _ = resolver.replaceFocusedText(with: corrected)
-            }
-            keyboardBuffer.replaceLine(with: corrected)
+            show(display.completedText(with: corrected), in: input)
         } catch {
+            show(display.statusText(for: textToFix, failed: true), in: input)
             NSLog("Writing fix shortcut failed: %@", error.localizedDescription)
         }
 
@@ -119,6 +126,9 @@ final class WritingFixFeature: AppFeature {
 
         isFixing = true
 
+        let display = triggerDisplay(for: originalText, match: match)
+        show(display.statusText(for: match.textToFix), in: input)
+
         do {
             let correctedText = try await corrector.correctedText(
                 for: match.textToFix,
@@ -126,21 +136,52 @@ final class WritingFixFeature: AppFeature {
                 provider: match.rule.provider,
                 systemPrompt: systemPrompt
             )
-            if let input, input.canSetValue {
-                _ = resolver.replaceText(in: input, with: correctedText)
-                keyboardBuffer.replaceLine(with: correctedText)
-            } else if let input {
-                _ = resolver.replaceSuffix(in: input, suffixLength: match.suffixLength, with: correctedText)
-                keyboardBuffer.replaceLine(with: correctedText)
-            } else {
-                _ = resolver.replaceFocusedSuffix(suffixLength: match.suffixLength, with: correctedText)
-                keyboardBuffer.replaceLine(with: correctedText)
-            }
+            show(display.completedText(with: correctedText), in: input)
         } catch {
+            show(display.statusText(for: match.textToFix, failed: true), in: input)
             NSLog("Writing fix failed: %@", error.localizedDescription)
         }
 
         isFixing = false
+    }
+
+    private func shortcutDisplay(for input: FocusedTextInput?, selectedText: String) -> RewriteDisplay {
+        guard
+            let input,
+            let fullText = resolver.text(in: input),
+            let selectedRange = resolver.selectedRange(in: input, text: fullText),
+            !selectedRange.isEmpty
+        else {
+            return RewriteDisplay(
+                originalText: selectedText,
+                replacementRange: selectedText.startIndex..<selectedText.endIndex
+            )
+        }
+
+        return RewriteDisplay(originalText: fullText, replacementRange: selectedRange)
+    }
+
+    private func triggerDisplay(
+        for originalText: String,
+        match: (rule: WritingFixRule, textToFix: String, suffixLength: Int)
+    ) -> RewriteDisplay {
+        let suffixStart = originalText.index(
+            originalText.endIndex,
+            offsetBy: -min(match.suffixLength, originalText.count)
+        )
+        return RewriteDisplay(
+            originalText: originalText,
+            replacementRange: suffixStart..<originalText.endIndex
+        )
+    }
+
+    private func show(_ text: String, in input: FocusedTextInput?) {
+        if let input {
+            _ = resolver.replaceText(in: input, with: text)
+        } else {
+            _ = resolver.replaceFocusedText(with: text)
+        }
+        keyboardBuffer.replaceLine(with: text)
     }
 
     private func matchedRule(

@@ -45,6 +45,24 @@ final class FocusedTextInputResolver {
         stringAttribute(kAXSelectedTextAttribute as String, from: input.element)
     }
 
+    func selectedRange(in input: FocusedTextInput, text: String) -> Range<String.Index>? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            input.element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &value
+        ) == .success,
+        let value,
+        CFGetTypeID(value) == AXValueGetTypeID()
+        else {
+            return nil
+        }
+
+        var range = CFRange()
+        guard AXValueGetValue(value as! AXValue, .cfRange, &range) else { return nil }
+        return Range(NSRange(location: range.location, length: range.length), in: text)
+    }
+
     func replaceSelectedText(in input: FocusedTextInput, with text: String) -> Bool {
         _ = AXUIElementSetAttributeValue(input.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         pasteString(text, restoreCaretIn: input.element)
