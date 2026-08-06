@@ -69,8 +69,9 @@ final class DockWindowPopupController {
         vscodeFolderShortcuts: [VSCodeFolderShortcut],
         hideWindowsList: Bool
     ) {
-        let icon = NSRunningApplication(processIdentifier: app.processIdentifier)?.icon
-        let isAppFocused = NSRunningApplication(processIdentifier: app.processIdentifier)?.isActive ?? false
+        let runningApp = NSRunningApplication(processIdentifier: app.processIdentifier)
+        let icon = runningApp?.icon ?? app.bundleURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
+        let isAppFocused = runningApp?.isActive ?? false
         let foregroundProcessIdentifier = app.processIdentifier
         let isVSCodeApp = isVSCodeBundle(app.bundleIdentifier)
         let showNewWindowButton = isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)
@@ -112,7 +113,8 @@ final class DockWindowPopupController {
                 onOpenVSCodeFolder: { [weak self] shortcut in
                     self?.openVSCodeFolder(
                         shortcut,
-                        processIdentifier: app.processIdentifier
+                        processIdentifier: app.processIdentifier,
+                        bundleURL: app.bundleURL
                     )
                 }
             )
@@ -350,7 +352,11 @@ final class DockWindowPopupController {
         return CGSize(width: width, height: height)
     }
 
-    private func openVSCodeFolder(_ shortcut: VSCodeFolderShortcut, processIdentifier: pid_t) {
+    private func openVSCodeFolder(
+        _ shortcut: VSCodeFolderShortcut,
+        processIdentifier: pid_t,
+        bundleURL: URL?
+    ) {
         let path = shortcut.path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
 
@@ -359,8 +365,7 @@ final class DockWindowPopupController {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
 
-        if let app = NSRunningApplication(processIdentifier: processIdentifier),
-           let bundleURL = app.bundleURL {
+        if let bundleURL = NSRunningApplication(processIdentifier: processIdentifier)?.bundleURL ?? bundleURL {
             NSWorkspace.shared.open(
                 [folderURL],
                 withApplicationAt: bundleURL,
@@ -508,7 +513,7 @@ private struct DockWindowPopupView: View {
                     WindowRow(
                         icon: appIcon,
                         title: shortcutDisplayName(for: shortcut.path),
-                        subtitle: shortcut.path,
+                        subtitle: nil,
                         onOpen: { onOpenVSCodeFolder(shortcut) },
                         onClose: nil
                     )

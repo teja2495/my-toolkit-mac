@@ -89,15 +89,35 @@ final class DockHoverDetector {
             runningApplication = nil
         }
 
-        guard let runningApplication else { return nil }
         guard let dockItemFrame = frame(of: element) else { return nil }
+
+        // VS Code's Dock item remains available after the app quits. Keep it
+        // eligible so its configured folder shortcuts can also launch VS Code.
+        guard let runningApplication else {
+            guard isVSCodeBundle(bundleIdentifierFromURL), let bundleIdentifierFromURL else {
+                return nil
+            }
+            return DockHoveredApplication(
+                processIdentifier: 0,
+                bundleIdentifier: bundleIdentifierFromURL,
+                bundleURL: urlAttribute("AXURL", from: element),
+                displayName: title ?? "Visual Studio Code",
+                dockItemFrame: dockItemFrame
+            )
+        }
 
         return DockHoveredApplication(
             processIdentifier: runningApplication.processIdentifier,
             bundleIdentifier: runningApplication.bundleIdentifier ?? bundleIdentifierFromURL,
+            bundleURL: runningApplication.bundleURL ?? urlAttribute("AXURL", from: element),
             displayName: runningApplication.localizedName ?? title ?? "App",
             dockItemFrame: dockItemFrame
         )
+    }
+
+    private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
+        bundleIdentifier == "com.microsoft.VSCode"
+            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
     }
 
     private func frame(of element: AXUIElement) -> CGRect? {
