@@ -49,7 +49,7 @@ struct ContentView: View {
 private struct SidebarBackdrop: View {
     var body: some View {
         Color(nsColor: .windowBackgroundColor)
-            .opacity(0.92)
+            .opacity(0.9)
             .ignoresSafeArea()
     }
 }

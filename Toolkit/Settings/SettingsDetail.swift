@@ -61,7 +61,8 @@ private struct EmptySelectionView: View {
 private struct DetailBackdrop: View {
     var body: some View {
         ZStack {
-            Color.clear
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(0.9)
             DotGridPattern()
                 .opacity(0.35)
         }
