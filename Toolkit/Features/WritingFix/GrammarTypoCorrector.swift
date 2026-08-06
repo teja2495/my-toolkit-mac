@@ -47,6 +47,13 @@ struct GrammarTypoCorrector {
                 systemPrompt: instructions
             )
             return clean(response, original: text)
+        case .codexCLI:
+            let response = try await CLIRewriteClient().correctedText(
+                for: prompt,
+                systemPrompt: instructions,
+                provider: provider
+            )
+            return clean(response, original: text)
         }
     }
 

@@ -32,7 +32,7 @@ struct WritingFixSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "Rewritely",
-            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence or ChatGPT."
+            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence, ChatGPT, or Codex CLI."
         ) {
             featureToggle
         } content: {
@@ -42,6 +42,8 @@ struct WritingFixSettingsView: View {
                 }
 
                 chatGPTSettings
+
+                cliSettings
 
                 systemPromptSettings
 
@@ -159,6 +161,19 @@ struct WritingFixSettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(apiKeyMessageIsError ? Color.red : Color.green)
                 }
+            }
+        }
+    }
+
+    private var cliSettings: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Command-line providers")
+                    .font(.system(size: 13, weight: .semibold))
+
+                Text("Codex CLI uses Luna with codex exec. Install and sign in to Codex separately; no API key is stored by Rewritely.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -338,7 +353,7 @@ struct WritingFixSettingsView: View {
                 }
             } else {
                 HStack(spacing: 6) {
-                    Image(systemName: rule.provider == .chatGPT ? "bubble.left.and.bubble.right" : "apple.intelligence")
+                    Image(systemName: rule.provider.iconName)
                         .font(.system(size: 10))
                     Text(rule.provider.title)
                         .font(.system(size: 11, weight: .medium))

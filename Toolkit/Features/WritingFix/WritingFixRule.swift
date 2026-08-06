@@ -3,6 +3,7 @@ import Foundation
 enum WritingFixProvider: String, Codable, CaseIterable, Identifiable {
     case appleIntelligence
     case chatGPT
+    case codexCLI
 
     var id: String { rawValue }
 
@@ -12,6 +13,19 @@ enum WritingFixProvider: String, Codable, CaseIterable, Identifiable {
             return "Apple Intelligence"
         case .chatGPT:
             return "ChatGPT"
+        case .codexCLI:
+            return "Codex CLI"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .appleIntelligence:
+            return "apple.intelligence"
+        case .chatGPT:
+            return "bubble.left.and.bubble.right"
+        case .codexCLI:
+            return "chevron.left.forwardslash.chevron.right"
         }
     }
 }
