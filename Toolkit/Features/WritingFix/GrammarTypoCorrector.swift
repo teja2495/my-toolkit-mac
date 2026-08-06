@@ -25,33 +25,53 @@ struct GrammarTypoCorrector {
         }
     }
 
-    func correctedText(for text: String, promptTemplate: String) async throws -> String {
+    func correctedText(
+        for text: String,
+        promptTemplate: String,
+        provider: WritingFixProvider,
+        systemPrompt: String
+    ) async throws -> String {
+        let instructions = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = renderedPrompt(from: promptTemplate, text: text)
+
+        switch provider {
+        case .appleIntelligence:
+            return try await correctedTextWithAppleIntelligence(
+                original: text,
+                prompt: prompt,
+                instructions: instructions
+            )
+        case .chatGPT:
+            let response = try await ChatGPTRewriteClient().correctedText(
+                for: prompt,
+                systemPrompt: instructions
+            )
+            return clean(response, original: text)
+        }
+    }
+
+    private func correctedTextWithAppleIntelligence(
+        original: String,
+        prompt: String,
+        instructions: String
+    ) async throws -> String {
         let model = SystemLanguageModel.default
         guard model.availability == .available else {
             throw CorrectionError.modelUnavailable(model.availability)
         }
 
-        let instructions = """
-        Fix only grammar mistakes and typos.
-        Do not rewrite, rephrase, summarize, expand, or change the meaning.
-        Preserve the original tone, language, capitalization style, punctuation style, whitespace, and line breaks unless a grammar or typo fix requires a change.
-        If there are no mistakes, return the original text exactly.
-        Return only the final corrected text with no quotes, labels, markdown, or explanation.
-        """
-
         let session = LanguageModelSession(model: model, instructions: instructions)
-        let prompt = renderedPrompt(from: promptTemplate, text: text)
 
         let response = try await session.respond(
             to: prompt,
             options: GenerationOptions(
                 sampling: .greedy,
                 temperature: 0,
-                maximumResponseTokens: max(64, min(4096, text.count + 128))
+                maximumResponseTokens: max(64, min(4096, original.count + 128))
             )
         )
 
-        return clean(response.content, original: text)
+        return clean(response.content, original: original)
     }
 
     private func renderedPrompt(from template: String, text: String) -> String {

@@ -93,6 +93,29 @@ final class FocusedTextInputResolver {
         return true
     }
 
+    func focusedTextByCopying() async -> String? {
+        let pasteboard = NSPasteboard.general
+        let existingItems = copiedPasteboardItems(from: pasteboard)
+        let previousChangeCount = pasteboard.changeCount
+
+        sendKey(keyCode: 0, flags: .maskCommand) // A
+        sendKey(keyCode: 8, flags: .maskCommand) // C
+
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let text = pasteboard.changeCount != previousChangeCount
+            ? pasteboard.string(forType: .string)
+            : nil
+        restorePasteboard(existingItems, to: pasteboard)
+
+        return text?.isEmpty == false ? text : nil
+    }
+
+    func replaceFocusedText(with replacement: String) -> Bool {
+        sendKey(keyCode: 0, flags: .maskCommand) // A
+        pasteString(replacement, restoreCaretIn: nil)
+        return true
+    }
+
     func elementAtScreenPoint(_ point: CGPoint) -> AXUIElement? {
         guard let primaryScreen = NSScreen.screens.first else { return nil }
         let flippedY = primaryScreen.frame.height - point.y
@@ -245,15 +268,7 @@ final class FocusedTextInputResolver {
 
     private func pasteString(_ string: String, restoreCaretIn element: AXUIElement?) {
         let pasteboard = NSPasteboard.general
-        let existingItems = pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
-            let copy = NSPasteboardItem()
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    copy.setData(data, forType: type)
-                }
-            }
-            return copy
-        }
+        let existingItems = copiedPasteboardItems(from: pasteboard)
 
         pasteboard.clearContents()
         pasteboard.setString(string, forType: .string)
@@ -266,9 +281,27 @@ final class FocusedTextInputResolver {
         if let existingItems {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                pasteboard.clearContents()
-                pasteboard.writeObjects(existingItems)
+                restorePasteboard(existingItems, to: pasteboard)
             }
+        }
+    }
+
+    private func copiedPasteboardItems(from pasteboard: NSPasteboard) -> [NSPasteboardItem]? {
+        pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+    }
+
+    private func restorePasteboard(_ items: [NSPasteboardItem]?, to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        if let items {
+            pasteboard.writeObjects(items)
         }
     }
 

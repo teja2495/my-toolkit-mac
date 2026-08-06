@@ -67,7 +67,7 @@ final class AppBootstrapper: ObservableObject {
         FeatureDescriptor(
             id: "writing-fix",
             title: "Rewritely",
-            summary: "Type a trigger at the end of focused text to fix grammar and typos with Apple Intelligence.",
+            summary: "Type a trigger at the end of focused text to rewrite it with Apple Intelligence or ChatGPT.",
             requiresAccessibilityAccess: true,
             isEnabled: true
         ),
@@ -119,6 +119,22 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var writingFixSystemPrompt: String {
+        didSet {
+            let trimmedPrompt = writingFixSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if writingFixSystemPrompt != trimmedPrompt {
+                writingFixSystemPrompt = trimmedPrompt
+                return
+            }
+
+            UserDefaults.standard.set(trimmedPrompt, forKey: Self.writingFixSystemPromptKey)
+            (liveFeatures["writing-fix"] as? WritingFixFeature)?.systemPrompt = trimmedPrompt
+        }
+    }
+
+    @Published private(set) var hasWritingFixAPIKey: Bool
+    @Published private(set) var writingFixAPIKeyMask: String?
+
     @Published var vscodeFolderShortcuts: [VSCodeFolderShortcut] {
         didSet {
             let safeShortcuts = Self.sanitizedVSCodeFolderShortcuts(vscodeFolderShortcuts)
@@ -160,12 +176,12 @@ final class AppBootstrapper: ObservableObject {
     private static let defaultDockHoverPopupDelay = 2.0
     private static let legacyDockHoverPopupDelay = 0.25
     private static let writingFixRulesKey = "writingFixRules"
+    private static let writingFixSystemPromptKey = "writingFixSystemPrompt"
     private static let writingFixTriggerKey = "writingFixTrigger"
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
     private static let phoneClipboardSyncEnabledKey = "phoneClipboardSyncEnabled"
     private static let featureEnabledKeyPrefix = "featureEnabled."
-    private static let defaultWritingFixTrigger = "fxx"
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
     private var liveFeatures: [String: AppFeature] = [:]
@@ -184,6 +200,11 @@ final class AppBootstrapper: ObservableObject {
         dockHoverPopupDelay = resolvedDelay
         textExpanderEntries = Self.loadTextExpanderEntries()
         writingFixRules = Self.loadWritingFixRules()
+        writingFixSystemPrompt = UserDefaults.standard.string(forKey: Self.writingFixSystemPromptKey)
+            ?? ""
+        let savedWritingFixAPIKey = WritingFixAPIKeyStore.load()
+        hasWritingFixAPIKey = savedWritingFixAPIKey != nil
+        writingFixAPIKeyMask = Self.maskedWritingFixAPIKey(savedWritingFixAPIKey)
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
@@ -206,6 +227,19 @@ final class AppBootstrapper: ObservableObject {
         accessibilityPermissionManager.resetAccessibilityPermission()
         accessibilityPermissionManager.requestAccessIfNeeded()
         updateFeatureLifecycle()
+    }
+
+    func saveWritingFixAPIKey(_ apiKey: String) throws {
+        try WritingFixAPIKeyStore.save(apiKey)
+        let savedAPIKey = WritingFixAPIKeyStore.load()
+        hasWritingFixAPIKey = savedAPIKey != nil
+        writingFixAPIKeyMask = Self.maskedWritingFixAPIKey(savedAPIKey)
+    }
+
+    func deleteWritingFixAPIKey() throws {
+        try WritingFixAPIKeyStore.delete()
+        hasWritingFixAPIKey = false
+        writingFixAPIKeyMask = nil
     }
 
     func toggleFeature(id: String) {
@@ -303,6 +337,7 @@ final class AppBootstrapper: ObservableObject {
             }
             if let writingFixFeature = liveFeatures[feature.id] as? WritingFixFeature {
                 writingFixFeature.rules = writingFixRules
+                writingFixFeature.systemPrompt = writingFixSystemPrompt
             }
             if let textExpanderFeature = liveFeatures[feature.id] as? TextExpanderFeature {
                 textExpanderFeature.entries = textExpanderEntries
@@ -322,6 +357,7 @@ final class AppBootstrapper: ObservableObject {
         }
         if let writingFixFeature = feature as? WritingFixFeature {
             writingFixFeature.rules = writingFixRules
+            writingFixFeature.systemPrompt = writingFixSystemPrompt
         }
         if let textExpanderFeature = feature as? TextExpanderFeature {
             textExpanderFeature.entries = textExpanderEntries
@@ -372,6 +408,11 @@ final class AppBootstrapper: ObservableObject {
         KeyboardShortcuts.setShortcut(.init(.g, modifiers: [.command, .shift]), for: firstRule.shortcutName)
     }
 
+    private static func maskedWritingFixAPIKey(_ apiKey: String?) -> String? {
+        guard let apiKey, !apiKey.isEmpty else { return nil }
+        return "****\(apiKey.suffix(3))"
+    }
+
     private static func loadWritingFixRules() -> [WritingFixRule] {
         let defaults = UserDefaults.standard
         if let data = defaults.data(forKey: writingFixRulesKey),
@@ -379,12 +420,14 @@ final class AppBootstrapper: ObservableObject {
             return sanitizedRules(decodedRules)
         }
 
-        let savedTrigger = defaults.string(forKey: writingFixTriggerKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let savedTrigger = defaults.string(forKey: writingFixTriggerKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !savedTrigger.isEmpty else {
+            return []
+        }
 
-        let fallbackTrigger = (savedTrigger?.isEmpty == false) ? savedTrigger! : defaultWritingFixTrigger
         return sanitizedRules([
-            WritingFixRule(trigger: fallbackTrigger, prompt: defaultWritingFixPrompt)
+            WritingFixRule(trigger: savedTrigger, prompt: defaultWritingFixPrompt)
         ])
     }
 
@@ -420,23 +463,21 @@ final class AppBootstrapper: ObservableObject {
         for rule in rules {
             let trigger = rule.trigger.trimmingCharacters(in: .whitespacesAndNewlines)
             let prompt = rule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            let safeTrigger = trigger.isEmpty ? defaultWritingFixTrigger : trigger
-            let safePrompt = prompt.isEmpty ? defaultWritingFixPrompt : prompt
+            let hasShortcut = KeyboardShortcuts.getShortcut(for: rule.shortcutName) != nil
+            guard !trigger.isEmpty || hasShortcut, !prompt.isEmpty else { continue }
 
-            guard !seenTriggers.contains(safeTrigger) else { continue }
-            seenTriggers.insert(safeTrigger)
+            if !trigger.isEmpty {
+                guard !seenTriggers.contains(trigger) else { continue }
+                seenTriggers.insert(trigger)
+            }
             deduplicatedRules.append(
-                WritingFixRule(id: rule.id, trigger: safeTrigger, prompt: safePrompt)
-            )
-        }
-
-        if deduplicatedRules.isEmpty {
-            deduplicatedRules = [
                 WritingFixRule(
-                    trigger: defaultWritingFixTrigger,
-                    prompt: defaultWritingFixPrompt
+                    id: rule.id,
+                    trigger: trigger,
+                    prompt: prompt,
+                    provider: rule.provider
                 )
-            ]
+            )
         }
 
         return deduplicatedRules

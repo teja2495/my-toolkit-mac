@@ -13,6 +13,7 @@ final class WritingFixFeature: AppFeature {
             }
         }
     }
+    var systemPrompt = ""
 
     private let resolver = FocusedTextInputResolver()
     private let corrector = GrammarTypoCorrector()
@@ -62,9 +63,9 @@ final class WritingFixFeature: AppFeature {
 
     private func triggerFixViaShortcut(for rule: WritingFixRule) async {
         guard !isFixing else { return }
-        guard let input = resolver.focusedTextInput() else { return }
+        let input = resolver.focusedTextInput()
 
-        let selected = resolver.selectedText(in: input)
+        let selected = input.flatMap { resolver.selectedText(in: $0) }
         let hasSelection = selected.map { !$0.isEmpty } ?? false
 
         let textToFix: String
@@ -73,7 +74,10 @@ final class WritingFixFeature: AppFeature {
         if hasSelection, let sel = selected {
             textToFix = sel
             useSelection = true
-        } else if let full = resolver.text(in: input), !full.isEmpty {
+        } else if let input, let full = resolver.text(in: input), !full.isEmpty {
+            textToFix = full
+            useSelection = false
+        } else if let full = await resolver.focusedTextByCopying() {
             textToFix = full
             useSelection = false
         } else {
@@ -83,11 +87,18 @@ final class WritingFixFeature: AppFeature {
         isFixing = true
 
         do {
-            let corrected = try await corrector.correctedText(for: textToFix, promptTemplate: rule.prompt)
-            if useSelection {
+            let corrected = try await corrector.correctedText(
+                for: textToFix,
+                promptTemplate: rule.prompt,
+                provider: rule.provider,
+                systemPrompt: systemPrompt
+            )
+            if useSelection, let input {
                 _ = resolver.replaceSelectedText(in: input, with: corrected)
-            } else {
+            } else if let input {
                 _ = resolver.replaceText(in: input, with: corrected)
+            } else {
+                _ = resolver.replaceFocusedText(with: corrected)
             }
             keyboardBuffer.replaceLine(with: corrected)
         } catch {
@@ -111,7 +122,9 @@ final class WritingFixFeature: AppFeature {
         do {
             let correctedText = try await corrector.correctedText(
                 for: match.textToFix,
-                promptTemplate: match.rule.prompt
+                promptTemplate: match.rule.prompt,
+                provider: match.rule.provider,
+                systemPrompt: systemPrompt
             )
             if let input, input.canSetValue {
                 _ = resolver.replaceText(in: input, with: correctedText)
