@@ -300,6 +300,9 @@ final class AppBootstrapper: ObservableObject {
             let feature = DockWindowHoverFeature()
             feature.popupDelay = max(0, dockHoverPopupDelay)
             feature.vscodeFolderShortcuts = vscodeFolderShortcuts
+            feature.onVSCodeFolderShortcutsChanged = { [weak self] shortcuts in
+                self?.vscodeFolderShortcuts = shortcuts
+            }
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())
@@ -331,6 +334,9 @@ final class AppBootstrapper: ObservableObject {
             if let dockFeature = liveFeatures[feature.id] as? DockWindowHoverFeature {
                 dockFeature.popupDelay = max(0, dockHoverPopupDelay)
                 dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
+                dockFeature.onVSCodeFolderShortcutsChanged = { [weak self] shortcuts in
+                    self?.vscodeFolderShortcuts = shortcuts
+                }
             }
             if let mediaControlsFeature = liveFeatures[feature.id] as? MediaControlsFeature {
                 mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)
@@ -351,6 +357,9 @@ final class AppBootstrapper: ObservableObject {
         if let dockFeature = feature as? DockWindowHoverFeature {
             dockFeature.popupDelay = max(0, dockHoverPopupDelay)
             dockFeature.vscodeFolderShortcuts = vscodeFolderShortcuts
+            dockFeature.onVSCodeFolderShortcutsChanged = { [weak self] shortcuts in
+                self?.vscodeFolderShortcuts = shortcuts
+            }
         }
         if let mediaControlsFeature = feature as? MediaControlsFeature {
             mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)

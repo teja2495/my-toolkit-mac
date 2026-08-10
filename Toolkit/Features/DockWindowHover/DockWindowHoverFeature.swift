@@ -6,6 +6,7 @@ final class DockWindowHoverFeature: AppFeature {
     let id = "dock-window-hover"
     var popupDelay: TimeInterval = 0.25
     var vscodeFolderShortcuts: [VSCodeFolderShortcut] = []
+    var onVSCodeFolderShortcutsChanged: (([VSCodeFolderShortcut]) -> Void)?
     var isSuspended: Bool = false {
         didSet {
             if isSuspended {
@@ -37,6 +38,12 @@ final class DockWindowHoverFeature: AppFeature {
 
     func start() {
         guard pollTimer == nil else { return }
+
+        popupController.onPinnedFoldersPersist = { [weak self] folders in
+            guard let self else { return }
+            self.vscodeFolderShortcuts = folders
+            self.onVSCodeFolderShortcutsChanged?(folders)
+        }
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -141,11 +148,14 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         if isSameApp {
-            popupController.updateContent(
-                for: hoveredApplication,
-                windows: cachedWindows,
-                vscodeFolderShortcuts: vscodeFolderShortcuts
-            )
+            // VS Code popup owns local search state/focus; avoid rebuilding it every poll tick.
+            if !isVSCode {
+                popupController.updateContent(
+                    for: hoveredApplication,
+                    windows: cachedWindows,
+                    vscodeFolderShortcuts: vscodeFolderShortcuts
+                )
+            }
         } else {
             popupController.show(
                 for: hoveredApplication,
@@ -169,6 +179,11 @@ final class DockWindowHoverFeature: AppFeature {
     }
 
     private func handleRightMouseDown(at mouseLocation: CGPoint) {
+        // Keep the popup open for in-popup actions like pin/unpin.
+        if popupController.isVisible, popupController.frameOnScreen.contains(mouseLocation) {
+            return
+        }
+
         let clickedApplication = hoverDetector.hoveredApplication(at: mouseLocation) ?? lastHoveredApplication
         guard let clickedApplication else { return }
         lastHoveredApplication = nil

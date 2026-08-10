@@ -3,17 +3,125 @@ import ApplicationServices
 import Combine
 import SwiftUI
 
+private final class DockHoverPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+private struct VSCodeSearchFolder: Identifiable, Equatable {
+    let id: String
+    let path: String
+    let name: String
+    let subtitle: String?
+}
+
+@MainActor
+private final class VSCodeFolderSearchModel: ObservableObject {
+    @Published var query: String = "" {
+        didSet { refreshResults() }
+    }
+    @Published private(set) var results: [VSCodeSearchFolder] = []
+
+    var onResultsChanged: (() -> Void)?
+
+    private var indexedFolders: [VSCodeSearchFolder] = []
+
+    func prepare() {
+        indexedFolders = Self.loadFolders()
+        refreshResults()
+    }
+
+    func reset() {
+        if query.isEmpty {
+            results = []
+            return
+        }
+        query = ""
+    }
+
+    private func refreshResults() {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextResults: [VSCodeSearchFolder]
+        if trimmed.isEmpty {
+            nextResults = []
+        } else {
+            nextResults = Array(
+                indexedFolders
+                    .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+                    .prefix(8)
+            )
+        }
+        guard nextResults != results else { return }
+        results = nextResults
+        onResultsChanged?()
+    }
+
+    private static func loadFolders() -> [VSCodeSearchFolder] {
+        let roots: [(path: String, subtitle: String?)] = [
+            ("/Users/teja2495/Projects", nil),
+            ("/Users/teja2495/Projects/more", "more")
+        ]
+        let fileManager = FileManager.default
+        var folders: [VSCodeSearchFolder] = []
+
+        for root in roots {
+            let rootURL = URL(fileURLWithPath: root.path, isDirectory: true)
+            guard let contents = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for url in contents {
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+                guard values?.isDirectory == true else { continue }
+                if root.subtitle == nil, url.lastPathComponent == "more" {
+                    continue
+                }
+                folders.append(
+                    VSCodeSearchFolder(
+                        id: url.path,
+                        path: url.standardizedFileURL.path,
+                        name: url.lastPathComponent,
+                        subtitle: root.subtitle
+                    )
+                )
+            }
+        }
+
+        return folders.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+}
+
+@MainActor
+private final class VSCodePinnedFoldersModel: ObservableObject {
+    @Published var folders: [VSCodeFolderShortcut] = []
+}
+
 @MainActor
 final class DockWindowPopupController {
-    private let panel: NSPanel
+    private let panel: DockHoverPanel
     private let windowProvider = AppWindowTitleProvider()
+    private let vscodeFolderSearch = VSCodeFolderSearchModel()
+    private let vscodePinnedFolders = VSCodePinnedFoldersModel()
     private var hostingController: NSHostingController<AnyView>
     private var latestFocusRequestID: UInt64 = 0
     private var initialWindowCount: Int = 0
+    private var anchoredDockItemFrame: CGRect = .zero
+    private var latestPreferredSizeInputs: (
+        app: DockHoveredApplication,
+        windows: [WindowInfo],
+        hideWindowsList: Bool
+    )?
+    var onPinnedFoldersPersist: (([VSCodeFolderShortcut]) -> Void)?
 
     init() {
         hostingController = NSHostingController(rootView: AnyView(EmptyView()))
-        panel = NSPanel(
+        panel = DockHoverPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -29,6 +137,10 @@ final class DockWindowPopupController {
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
 
+        vscodeFolderSearch.onResultsChanged = { [weak self] in
+            self?.resizeForCurrentContent()
+        }
+
         makePanelHierarchyTransparent()
     }
 
@@ -42,8 +154,14 @@ final class DockWindowPopupController {
     ) {
         initialWindowCount = windows.count
         let hideWindowsList = initialWindowCount == 1
-        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
-        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
+        anchoredDockItemFrame = app.dockItemFrame
+        if isVSCodeBundle(app.bundleIdentifier) {
+            vscodePinnedFolders.folders = vscodeFolderShortcuts
+            vscodeFolderSearch.reset()
+            vscodeFolderSearch.prepare()
+        }
+        setView(for: app, windows: windows, hideWindowsList: hideWindowsList)
+        let size = preferredSize(for: app, windows: windows, hideWindowsList: hideWindowsList)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
         panel.orderFrontRegardless()
     }
@@ -54,21 +172,27 @@ final class DockWindowPopupController {
         vscodeFolderShortcuts: [VSCodeFolderShortcut]
     ) {
         let hideWindowsList = initialWindowCount == 1
-        setView(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
-        let size = preferredSize(for: app, windows: windows, vscodeFolderShortcuts: vscodeFolderShortcuts, hideWindowsList: hideWindowsList)
+        anchoredDockItemFrame = app.dockItemFrame
+        if isVSCodeBundle(app.bundleIdentifier) {
+            vscodePinnedFolders.folders = vscodeFolderShortcuts
+        }
+        setView(for: app, windows: windows, hideWindowsList: hideWindowsList)
+        let size = preferredSize(for: app, windows: windows, hideWindowsList: hideWindowsList)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
     }
 
     func hide() {
+        vscodeFolderSearch.reset()
+        latestPreferredSizeInputs = nil
         panel.orderOut(nil)
     }
 
     private func setView(
         for app: DockHoveredApplication,
         windows: [WindowInfo],
-        vscodeFolderShortcuts: [VSCodeFolderShortcut],
         hideWindowsList: Bool
     ) {
+        latestPreferredSizeInputs = (app, windows, hideWindowsList)
         let runningApp = NSRunningApplication(processIdentifier: app.processIdentifier)
         let icon = runningApp?.icon ?? app.bundleURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
         let isAppFocused = runningApp?.isActive ?? false
@@ -80,7 +204,8 @@ final class DockWindowPopupController {
                 appIcon: icon,
                 appName: app.displayName,
                 windows: Array(windows.prefix(8)),
-                vscodeFolderShortcuts: vscodeFolderShortcuts,
+                vscodePinnedFolders: vscodePinnedFolders,
+                vscodeFolderSearch: vscodeFolderSearch,
                 isVSCodeApp: isVSCodeApp,
                 showNewWindowButton: showNewWindowButton,
                 isAppFocused: isAppFocused,
@@ -116,10 +241,59 @@ final class DockWindowPopupController {
                         processIdentifier: app.processIdentifier,
                         bundleURL: app.bundleURL
                     )
+                },
+                onPinVSCodeFolder: { [weak self] path in
+                    self?.pinVSCodeFolder(path)
+                },
+                onUnpinVSCodeFolder: { [weak self] shortcut in
+                    self?.unpinVSCodeFolder(shortcut)
+                },
+                onFocusSearchField: { [weak self] in
+                    self?.makePanelKeyForSearch()
                 }
             )
         )
         makePanelHierarchyTransparent()
+    }
+
+    private func makePanelKeyForSearch() {
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func pinVSCodeFolder(_ path: String) {
+        let standardizedPath = standardizedFolderPath(path)
+        guard !standardizedPath.isEmpty else { return }
+        guard !vscodePinnedFolders.folders.contains(where: { $0.path == standardizedPath }) else { return }
+
+        vscodePinnedFolders.folders.append(VSCodeFolderShortcut(path: standardizedPath))
+        onPinnedFoldersPersist?(vscodePinnedFolders.folders)
+        resizeForCurrentContent()
+    }
+
+    private func unpinVSCodeFolder(_ shortcut: VSCodeFolderShortcut) {
+        let standardizedPath = standardizedFolderPath(shortcut.path)
+        vscodePinnedFolders.folders.removeAll {
+            $0.id == shortcut.id || $0.path == standardizedPath
+        }
+        onPinnedFoldersPersist?(vscodePinnedFolders.folders)
+        resizeForCurrentContent()
+    }
+
+    private func standardizedFolderPath(_ path: String) -> String {
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return "" }
+        let expandedPath = (trimmedPath as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expandedPath).standardizedFileURL.path
+    }
+
+    private func resizeForCurrentContent() {
+        guard panel.isVisible, let inputs = latestPreferredSizeInputs else { return }
+        let size = preferredSize(
+            for: inputs.app,
+            windows: inputs.windows,
+            hideWindowsList: inputs.hideWindowsList
+        )
+        panel.setFrame(frame(for: size, anchoredTo: anchoredDockItemFrame), display: true)
     }
 
     private func makePanelHierarchyTransparent() {
@@ -332,22 +506,30 @@ final class DockWindowPopupController {
     private func preferredSize(
         for app: DockHoveredApplication,
         windows: [WindowInfo],
-        vscodeFolderShortcuts: [VSCodeFolderShortcut],
         hideWindowsList: Bool
     ) -> CGSize {
-        let rowCount: Int
-        if isVSCodeBundle(app.bundleIdentifier) {
-            rowCount = vscodeFolderShortcuts.count
-        } else {
-            let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
-            rowCount = hideWindowsList ? newWindowRow : Array(windows.prefix(8)).count + newWindowRow
-        }
         let width = 340.0
-
         // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
-        if rowCount > 0 {
-            height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
+
+        if isVSCodeBundle(app.bundleIdentifier) {
+            let isSearching = !vscodeFolderSearch.query
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+            let shortcutCount = isSearching ? 0 : vscodePinnedFolders.folders.count
+            let resultCount = vscodeFolderSearch.results.count
+            let rowCount = shortcutCount + resultCount
+            if rowCount > 0 {
+                height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
+            }
+            // Search field row under shortcuts/results.
+            height += 6.0 + 44.0
+        } else {
+            let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
+            let rowCount = hideWindowsList ? newWindowRow : Array(windows.prefix(8)).count + newWindowRow
+            if rowCount > 0 {
+                height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
+            }
         }
         return CGSize(width: width, height: height)
     }
@@ -401,19 +583,58 @@ final class DockWindowPopupController {
     private func restartApplication(processIdentifier: pid_t) {
         guard let app = NSRunningApplication(processIdentifier: processIdentifier),
               let bundleURL = app.bundleURL else { return }
+        let bundleIdentifier = app.bundleIdentifier
+
+        // Capture path up front; NSRunningApplication may become stale after quit.
+        let launchURL = bundleURL
         _ = app.terminate()
+
         Task { @MainActor in
-            let didTerminate = await waitForApplicationTransition(timeout: 10) {
+            var didTerminate = await waitForApplicationTransition(timeout: 4) {
                 app.isTerminated
             }
+
+            // Soft quit can hang on save sheets; escalate so restart always completes.
+            if !didTerminate {
+                _ = app.forceTerminate()
+                didTerminate = await waitForApplicationTransition(timeout: 3) {
+                    app.isTerminated
+                }
+            }
+
             guard didTerminate else {
+                hide()
                 return
             }
 
+            // Wait until Launch Services no longer lists this app as running.
+            if let bundleIdentifier {
+                _ = await waitForApplicationTransition(timeout: 3) {
+                    !NSWorkspace.shared.runningApplications.contains {
+                        $0.bundleIdentifier == bundleIdentifier && !$0.isTerminated
+                    }
+                }
+            }
+
+            // Brief settle so relaunch is not rejected as a duplicate launch.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+
             let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = false
-            configuration.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, _ in }
+            configuration.activates = true
+            configuration.createsNewApplicationInstance = false
+
+            do {
+                _ = try await NSWorkspace.shared.openApplication(at: launchURL, configuration: configuration)
+            } catch {
+                // Fallbacks for apps that reject openApplication after a forced quit.
+                if !NSWorkspace.shared.open(launchURL) {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                    process.arguments = [launchURL.path]
+                    try? process.run()
+                }
+            }
+
             hide()
         }
     }
@@ -482,7 +703,8 @@ private struct DockWindowPopupView: View {
     let appIcon: NSImage?
     let appName: String
     let windows: [WindowInfo]
-    let vscodeFolderShortcuts: [VSCodeFolderShortcut]
+    @ObservedObject var vscodePinnedFolders: VSCodePinnedFoldersModel
+    @ObservedObject var vscodeFolderSearch: VSCodeFolderSearchModel
     let isVSCodeApp: Bool
     let showNewWindowButton: Bool
     let isAppFocused: Bool
@@ -495,6 +717,9 @@ private struct DockWindowPopupView: View {
     let onClose: (WindowInfo) -> Void
     let onNewWindow: () -> Void
     let onOpenVSCodeFolder: (VSCodeFolderShortcut) -> Void
+    let onPinVSCodeFolder: (String) -> Void
+    let onUnpinVSCodeFolder: (VSCodeFolderShortcut) -> Void
+    let onFocusSearchField: () -> Void
 
     var body: some View {
         VStack(spacing: 6) {
@@ -509,15 +734,45 @@ private struct DockWindowPopupView: View {
             )
 
             if isVSCodeApp {
-                ForEach(vscodeFolderShortcuts) { shortcut in
+                let isSearching = !vscodeFolderSearch.query
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+
+                if !isSearching {
+                    ForEach(vscodePinnedFolders.folders) { shortcut in
+                        WindowRow(
+                            icon: appIcon,
+                            title: shortcutDisplayName(for: shortcut.path),
+                            subtitle: nil,
+                            onOpen: { onOpenVSCodeFolder(shortcut) },
+                            onClose: nil,
+                            onPin: nil,
+                            onUnpin: { onUnpinVSCodeFolder(shortcut) }
+                        )
+                    }
+                }
+
+                ForEach(vscodeFolderSearch.results) { folder in
+                    let pinnedShortcut = pinnedShortcut(for: folder.path)
                     WindowRow(
                         icon: appIcon,
-                        title: shortcutDisplayName(for: shortcut.path),
-                        subtitle: nil,
-                        onOpen: { onOpenVSCodeFolder(shortcut) },
-                        onClose: nil
+                        title: folder.name,
+                        subtitle: folder.subtitle,
+                        onOpen: {
+                            onOpenVSCodeFolder(VSCodeFolderShortcut(path: folder.path))
+                        },
+                        onClose: nil,
+                        onPin: pinnedShortcut == nil ? { onPinVSCodeFolder(folder.path) } : nil,
+                        onUnpin: pinnedShortcut.map { shortcut in
+                            { onUnpinVSCodeFolder(shortcut) }
+                        }
                     )
                 }
+
+                VSCodeFolderSearchField(
+                    text: $vscodeFolderSearch.query,
+                    onFocus: onFocusSearchField
+                )
             } else {
                 if !hideWindowsList {
                     ForEach(windows) { window in
@@ -526,7 +781,9 @@ private struct DockWindowPopupView: View {
                             title: window.title,
                             subtitle: nil,
                             onOpen: { onOpen(window) },
-                            onClose: { onClose(window) }
+                            onClose: { onClose(window) },
+                            onPin: nil,
+                            onUnpin: nil
                         )
                     }
                 }
@@ -537,7 +794,9 @@ private struct DockWindowPopupView: View {
                         title: "New Window",
                         subtitle: nil,
                         onOpen: onNewWindow,
-                        onClose: nil
+                        onClose: nil,
+                        onPin: nil,
+                        onUnpin: nil
                     )
                 }
             }
@@ -559,6 +818,153 @@ private struct DockWindowPopupView: View {
         let resolvedPath = (path as NSString).expandingTildeInPath
         let folderName = URL(fileURLWithPath: resolvedPath).lastPathComponent
         return folderName.isEmpty ? resolvedPath : folderName
+    }
+
+    private func pinnedShortcut(for path: String) -> VSCodeFolderShortcut? {
+        let standardizedPath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .path
+        return vscodePinnedFolders.folders.first { $0.path == standardizedPath }
+    }
+}
+
+private struct VSCodeFolderSearchField: View {
+    @Binding var text: String
+    let onFocus: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14, height: 14)
+
+            VSCodeFolderSearchTextField(text: $text, onFocus: onFocus)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        )
+    }
+}
+
+private struct VSCodeFolderSearchTextField: NSViewRepresentable {
+    @Binding var text: String
+    let onFocus: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onFocus: onFocus)
+    }
+
+    func makeNSView(context: Context) -> FocusAwareSearchField {
+        let field = FocusAwareSearchField(frame: .zero)
+        field.placeholderString = "Search Projects…"
+        field.stringValue = text
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 13, weight: .medium)
+        field.textColor = .labelColor
+        field.delegate = context.coordinator
+        field.onFocus = { [weak field] in
+            context.coordinator.onFocus()
+            field?.window?.makeFirstResponder(field)
+        }
+        context.coordinator.field = field
+        return field
+    }
+
+    func updateNSView(_ nsView: FocusAwareSearchField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        context.coordinator.onFocus = onFocus
+        nsView.onFocus = { [weak nsView] in
+            context.coordinator.onFocus()
+            nsView?.window?.makeFirstResponder(nsView)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        var onFocus: () -> Void
+        weak var field: FocusAwareSearchField?
+
+        init(text: Binding<String>, onFocus: @escaping () -> Void) {
+            self.text = text
+            self.onFocus = onFocus
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            onFocus()
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+    }
+}
+
+private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let ideal = cellSize(forBounds: rect)
+        var drawingRect = super.drawingRect(forBounds: rect)
+        let delta = drawingRect.height - ideal.height
+        if delta > 0 {
+            drawingRect.origin.y += floor(delta / 2)
+            drawingRect.size.height -= delta
+        }
+        return drawingRect
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+        super.select(
+            withFrame: drawingRect(forBounds: rect),
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            start: selStart,
+            length: selLength
+        )
+    }
+
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+        super.edit(
+            withFrame: drawingRect(forBounds: rect),
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            event: event
+        )
+    }
+}
+
+private final class FocusAwareSearchField: NSTextField {
+    var onFocus: (() -> Void)?
+
+    override class var cellClass: AnyClass? {
+        get { VerticallyCenteredTextFieldCell.self }
+        set {}
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        onFocus?()
+        return super.becomeFirstResponder()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onFocus?()
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
     }
 }
 
@@ -735,9 +1141,15 @@ private struct WindowRow: View {
     let subtitle: String?
     let onOpen: (() -> Void)?
     let onClose: (() -> Void)?
+    let onPin: (() -> Void)?
+    let onUnpin: (() -> Void)?
+
+    private var hasContextActions: Bool {
+        onPin != nil || onUnpin != nil
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
+        let row = HStack(spacing: 10) {
             if let icon {
                 Image(nsImage: icon)
                     .resizable()
@@ -784,5 +1196,22 @@ private struct WindowRow: View {
             onOpen?()
         }
         .opacity(onOpen == nil ? 0.75 : 1.0)
+
+        if hasContextActions {
+            row.contextMenu {
+                if let onPin {
+                    Button("Pin") {
+                        onPin()
+                    }
+                }
+                if let onUnpin {
+                    Button("Unpin") {
+                        onUnpin()
+                    }
+                }
+            }
+        } else {
+            row
+        }
     }
 }
