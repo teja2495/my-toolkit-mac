@@ -65,19 +65,23 @@ final class FocusedTextInputResolver {
 
     func replaceSelectedText(in input: FocusedTextInput, with text: String) -> Bool {
         _ = AXUIElementSetAttributeValue(input.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        pasteString(text, restoreCaretIn: input.element)
+        pasteString(text)
         return true
     }
 
     func replaceText(in input: FocusedTextInput, with correctedText: String) -> Bool {
-        if input.canSetValue {
+        // Chrome/web contenteditables often report AXValue as settable, but writing
+        // it (or AXSelectedTextRange) desyncs the DOM editing session — text
+        // appears updated while typing/caret movement stop working. Paste goes
+        // through the real input pipeline and keeps the field editable.
+        if input.canSetValue, supportsDirectValueReplacement(input) {
             let didSetValue = AXUIElementSetAttributeValue(
                 input.element,
                 kAXValueAttribute as CFString,
                 correctedText as CFString
             ) == .success
             if didSetValue {
-                setCursorToEndWithDelay(of: input.element)
+                _ = setCaretToEnd(of: input.element, in: correctedText)
             }
             return didSetValue
         }
@@ -88,7 +92,7 @@ final class FocusedTextInputResolver {
     func replaceSuffix(in input: FocusedTextInput, suffixLength: Int, with replacement: String) -> Bool {
         guard suffixLength >= 0 else { return false }
 
-        if input.canSetValue {
+        if input.canSetValue, supportsDirectValueReplacement(input) {
             guard let text = text(in: input), suffixLength <= text.count else { return false }
             return replaceText(in: input, with: String(text.dropLast(suffixLength)) + replacement)
         }
@@ -97,7 +101,7 @@ final class FocusedTextInputResolver {
         for _ in 0..<suffixLength {
             sendKey(keyCode: 51, flags: []) // Delete
         }
-        pasteString(replacement, restoreCaretIn: nil)
+        pasteString(replacement)
         return true
     }
 
@@ -107,7 +111,7 @@ final class FocusedTextInputResolver {
         for _ in 0..<suffixLength {
             sendKey(keyCode: 51, flags: []) // Delete
         }
-        pasteString(replacement, restoreCaretIn: nil)
+        pasteString(replacement)
         return true
     }
 
@@ -130,7 +134,7 @@ final class FocusedTextInputResolver {
 
     func replaceFocusedText(with replacement: String) -> Bool {
         sendKey(keyCode: 0, flags: .maskCommand) // A
-        pasteString(replacement, restoreCaretIn: nil)
+        pasteString(replacement)
         return true
     }
 
@@ -231,6 +235,28 @@ final class FocusedTextInputResolver {
         return settable.boolValue
     }
 
+    private func supportsDirectValueReplacement(_ input: FocusedTextInput) -> Bool {
+        switch input.role {
+        case kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole:
+            return !isInsideWebContent(input.element)
+        default:
+            return false
+        }
+    }
+
+    private func isInsideWebContent(_ element: AXUIElement) -> Bool {
+        var current: AXUIElement? = element
+        var depth = 0
+        while let node = current, depth < 24 {
+            if stringAttribute(kAXRoleAttribute as String, from: node) == "AXWebArea" {
+                return true
+            }
+            current = elementAttribute(kAXParentAttribute as String, from: node)
+            depth += 1
+        }
+        return false
+    }
+
     private func frame(of element: AXUIElement) -> CGRect? {
         var positionRef: CFTypeRef?
         var sizeRef: CFTypeRef?
@@ -280,11 +306,11 @@ final class FocusedTextInputResolver {
     private func pasteReplacement(_ replacement: String, into element: AXUIElement) -> Bool {
         _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         sendKey(keyCode: 0, flags: .maskCommand) // A
-        pasteString(replacement, restoreCaretIn: element)
+        pasteString(replacement)
         return true
     }
 
-    private func pasteString(_ string: String, restoreCaretIn element: AXUIElement?) {
+    private func pasteString(_ string: String) {
         let pasteboard = NSPasteboard.general
         let existingItems = copiedPasteboardItems(from: pasteboard)
 
@@ -292,9 +318,8 @@ final class FocusedTextInputResolver {
         pasteboard.setString(string, forType: .string)
 
         sendKey(keyCode: 9, flags: .maskCommand) // V
-        if let element {
-            setCursorToEndWithDelay(of: element)
-        }
+        // Do not synthesize Cmd+Down/End after paste — Chrome treats those as
+        // page scroll. Paste already leaves the caret after the inserted text.
 
         if let existingItems {
             Task { @MainActor in
@@ -323,18 +348,18 @@ final class FocusedTextInputResolver {
         }
     }
 
-    private func setCursorToEndWithDelay(of element: AXUIElement) {
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            moveCaretToEndWithKeyboard(in: element)
-        }
-    }
-
-    private func moveCaretToEndWithKeyboard(in element: AXUIElement) {
-        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        sendKey(keyCode: 124, flags: .maskCommand) // Right Arrow: end of line in most apps
-        sendKey(keyCode: 125, flags: .maskCommand) // Down Arrow: end of document in text views
-        sendKey(keyCode: 119, flags: []) // End key fallback in controls that support it
+    /// Places the caret at the end via Accessibility. Avoids synthetic Cmd+Down /
+    /// End keys, which scroll the page in Chrome (e.g. Twitter compose).
+    @discardableResult
+    private func setCaretToEnd(of element: AXUIElement, in text: String) -> Bool {
+        let length = (text as NSString).length
+        var range = CFRange(location: length, length: 0)
+        guard let value = AXValueCreate(.cfRange, &range) else { return false }
+        return AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            value
+        ) == .success
     }
 
     private func sendKey(keyCode: CGKeyCode, flags: CGEventFlags) {

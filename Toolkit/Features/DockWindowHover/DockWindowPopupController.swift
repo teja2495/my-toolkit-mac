@@ -8,6 +8,18 @@ private final class DockHoverPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
+private final class FirstMouseHostingController<Content: View>: NSHostingController<Content> {
+    override func loadView() {
+        view = FirstMouseHostingView(rootView: rootView)
+    }
+}
+
 private struct VSCodeSearchFolder: Identifiable, Equatable {
     let id: String
     let path: String
@@ -120,7 +132,7 @@ final class DockWindowPopupController {
     var onPinnedFoldersPersist: (([VSCodeFolderShortcut]) -> Void)?
 
     init() {
-        hostingController = NSHostingController(rootView: AnyView(EmptyView()))
+        hostingController = FirstMouseHostingController(rootView: AnyView(EmptyView()))
         panel = DockHoverPanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
