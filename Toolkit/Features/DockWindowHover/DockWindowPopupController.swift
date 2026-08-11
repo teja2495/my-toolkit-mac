@@ -521,6 +521,11 @@ final class DockWindowPopupController {
         hideWindowsList: Bool
     ) -> CGSize {
         let width = 340.0
+
+        if (windows.isEmpty || hideWindowsList) && !isVSCodeBundle(app.bundleIdentifier) {
+            return CGSize(width: width, height: 174)
+        }
+
         // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
 
@@ -734,21 +739,31 @@ private struct DockWindowPopupView: View {
     let onFocusSearchField: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
-            AppHeaderRow(
-                icon: appIcon,
-                name: appName,
-                showsHideButton: isAppFocused,
-                onHide: onHide,
-                onRestart: onRestart,
-                onQuit: onQuit,
-                onForceQuit: onForceQuit
-            )
+        Group {
+            if (windows.isEmpty || hideWindowsList) && !isVSCodeApp {
+                EmptyAppControlsView(
+                    icon: appIcon,
+                    name: appName,
+                    onRestart: onRestart,
+                    onQuit: onQuit,
+                    onForceQuit: onForceQuit
+                )
+            } else {
+                VStack(spacing: 6) {
+                    AppHeaderRow(
+                        icon: appIcon,
+                        name: appName,
+                        showsHideButton: isAppFocused,
+                        onHide: onHide,
+                        onRestart: onRestart,
+                        onQuit: onQuit,
+                        onForceQuit: onForceQuit
+                    )
 
-            if isVSCodeApp {
-                let isSearching = !vscodeFolderSearch.query
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
+                    if isVSCodeApp {
+                        let isSearching = !vscodeFolderSearch.query
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
 
                 if !isSearching {
                     ForEach(vscodePinnedFolders.folders) { shortcut in
@@ -785,33 +800,35 @@ private struct DockWindowPopupView: View {
                     text: $vscodeFolderSearch.query,
                     onFocus: onFocusSearchField
                 )
-            } else {
-                if !hideWindowsList {
-                    ForEach(windows) { window in
+                } else {
+                    if !hideWindowsList {
+                        ForEach(windows) { window in
+                            WindowRow(
+                                icon: appIcon,
+                                title: window.title,
+                                subtitle: nil,
+                                onOpen: { onOpen(window) },
+                                onClose: { onClose(window) },
+                                onPin: nil,
+                                onUnpin: nil
+                            )
+                        }
+                    }
+
+                    if showNewWindowButton {
                         WindowRow(
                             icon: appIcon,
-                            title: window.title,
+                            title: "New Window",
                             subtitle: nil,
-                            onOpen: { onOpen(window) },
-                            onClose: { onClose(window) },
+                            onOpen: onNewWindow,
+                            onClose: nil,
                             onPin: nil,
                             onUnpin: nil
                         )
                     }
                 }
-
-                if showNewWindowButton {
-                    WindowRow(
-                        icon: appIcon,
-                        title: "New Window",
-                        subtitle: nil,
-                        onOpen: onNewWindow,
-                        onClose: nil,
-                        onPin: nil,
-                        onUnpin: nil
-                    )
-                }
             }
+        }
         }
         .padding(8)
         .background(
@@ -837,6 +854,68 @@ private struct DockWindowPopupView: View {
             .standardizedFileURL
             .path
         return vscodePinnedFolders.folders.first { $0.path == standardizedPath }
+    }
+}
+
+private struct EmptyAppControlsView: View {
+    let icon: NSImage?
+    let name: String
+    let onRestart: () -> Void
+    let onQuit: () -> Void
+    let onForceQuit: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 8) {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 44, height: 44)
+                }
+
+                Text(name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.primary)
+            }
+
+            HStack(spacing: 10) {
+                AppControlButton(title: "Quit", action: onQuit)
+                AppControlButton(title: "Restart", action: onRestart)
+                AppControlButton(title: "Force Quit", action: onForceQuit)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 18)
+        .onHover { _ in
+            NSCursor.arrow.set()
+        }
+    }
+}
+
+private struct AppControlButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(minWidth: 74, minHeight: 34)
+                .padding(.horizontal, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.18))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { _ in
+            NSCursor.arrow.set()
+        }
     }
 }
 
