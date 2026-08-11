@@ -523,7 +523,7 @@ final class DockWindowPopupController {
         let width = 340.0
 
         if (windows.isEmpty || hideWindowsList) && !isVSCodeBundle(app.bundleIdentifier) {
-            return CGSize(width: width, height: 174)
+            return CGSize(width: width, height: 110)
         }
 
         // 8px padding top + bottom, 44px app header, and rows.
@@ -742,7 +742,6 @@ private struct DockWindowPopupView: View {
         Group {
             if (windows.isEmpty || hideWindowsList) && !isVSCodeApp {
                 EmptyAppControlsView(
-                    icon: appIcon,
                     name: appName,
                     onRestart: onRestart,
                     onQuit: onQuit,
@@ -858,28 +857,18 @@ private struct DockWindowPopupView: View {
 }
 
 private struct EmptyAppControlsView: View {
-    let icon: NSImage?
     let name: String
     let onRestart: () -> Void
     let onQuit: () -> Void
     let onForceQuit: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            VStack(spacing: 8) {
-                if let icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 44, height: 44)
-                }
-
-                Text(name)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(.primary)
-            }
+        VStack(spacing: 14) {
+            Text(name)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(.primary)
 
             HStack(spacing: 10) {
                 AppControlButton(title: "Quit", action: onQuit)
@@ -889,7 +878,7 @@ private struct EmptyAppControlsView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 16)
-        .padding(.vertical, 18)
+        .padding(.vertical, 14)
         .onHover { _ in
             NSCursor.arrow.set()
         }
