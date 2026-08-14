@@ -4,16 +4,58 @@ import Foundation
 @MainActor
 final class TextExpanderFeature: AppFeature {
     let id = "text-expander"
-    var entries: [TextExpanderEntry] = []
+    var entries: [TextExpanderEntry] = [] {
+        didSet {
+            guard isStarted else { return }
+            updateMonitoring()
+        }
+    }
 
     private let resolver = FocusedTextInputResolver()
     private let keyboardBuffer = KeyboardTextBuffer.shared
     private var pollTimer: Timer?
+    private var isKeyboardBufferStarted = false
+    private var isStarted = false
     private var isExpanding = false
 
     func start() {
+        guard !isStarted else { return }
+        isStarted = true
+        updateMonitoring()
+    }
+
+    func stop() {
+        guard isStarted else { return }
+        isStarted = false
+        pollTimer?.invalidate()
+        pollTimer = nil
+        if isKeyboardBufferStarted {
+            keyboardBuffer.stop()
+            isKeyboardBufferStarted = false
+        }
+        isExpanding = false
+    }
+
+    private func updateMonitoring() {
+        let needsMonitoring = entries.contains {
+            !$0.shortcut.isEmpty && !$0.expansion.isEmpty
+        }
+
+        guard needsMonitoring else {
+            pollTimer?.invalidate()
+            pollTimer = nil
+            if isKeyboardBufferStarted {
+                keyboardBuffer.stop()
+                isKeyboardBufferStarted = false
+            }
+            return
+        }
+
+        if !isKeyboardBufferStarted {
+            keyboardBuffer.start()
+            isKeyboardBufferStarted = true
+        }
         guard pollTimer == nil else { return }
-        keyboardBuffer.start()
 
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -21,17 +63,9 @@ final class TextExpanderFeature: AppFeature {
                 self.checkAndExpand()
             }
         }
-
         if let pollTimer {
             RunLoop.main.add(pollTimer, forMode: .common)
         }
-    }
-
-    func stop() {
-        pollTimer?.invalidate()
-        pollTimer = nil
-        keyboardBuffer.stop()
-        isExpanding = false
     }
 
     private func checkAndExpand() {

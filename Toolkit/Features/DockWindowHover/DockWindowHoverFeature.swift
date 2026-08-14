@@ -9,6 +9,7 @@ final class DockWindowHoverFeature: AppFeature {
     var onVSCodeFolderShortcutsChanged: (([VSCodeFolderShortcut]) -> Void)?
     var isSuspended: Bool = false {
         didSet {
+            lastPolledMouseLocation = nil
             if isSuspended {
                 lastHoveredApplication = nil
                 pendingHoveredApplication = nil
@@ -35,6 +36,7 @@ final class DockWindowHoverFeature: AppFeature {
     private var lastDockItemFrame: CGRect = .zero
     private var cachedWindows: [WindowInfo] = []
     private var lastWindowRefreshDate: Date = .distantPast
+    private var lastPolledMouseLocation: CGPoint?
 
     func start() {
         guard pollTimer == nil else { return }
@@ -77,6 +79,7 @@ final class DockWindowHoverFeature: AppFeature {
         rightClickSuppressedDockItemFrame = nil
         lastDockItemFrame = .zero
         cachedWindows = []
+        lastPolledMouseLocation = nil
         popupController.hide()
     }
 
@@ -86,6 +89,12 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         let mouseLocation = NSEvent.mouseLocation
+        if mouseLocation == lastPolledMouseLocation,
+           pendingHoveredApplication == nil,
+           !popupController.isVisible {
+            return
+        }
+        lastPolledMouseLocation = mouseLocation
 
         // Stay open while the cursor is inside the popup itself.
         if popupController.isVisible, popupController.frameOnScreen.contains(mouseLocation) {

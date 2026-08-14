@@ -6,11 +6,12 @@ final class WritingFixFeature: AppFeature {
     let id = "writing-fix"
     var rules: [WritingFixRule] = [] {
         didSet {
-            guard pollTimer != nil else { return }
+            guard isStarted else { return }
             let oldIDs = Set(oldValue.map(\.id))
             for rule in rules where !oldIDs.contains(rule.id) {
                 registerShortcutHandler(for: rule)
             }
+            updateAutomaticTriggerMonitoring()
         }
     }
     var systemPrompt = ""
@@ -20,6 +21,8 @@ final class WritingFixFeature: AppFeature {
     private let keyboardBuffer = KeyboardTextBuffer.shared
 
     private var pollTimer: Timer?
+    private var isKeyboardBufferStarted = false
+    private var isStarted = false
     private var isFixing = false
 
     private struct RewriteDisplay {
@@ -37,19 +40,9 @@ final class WritingFixFeature: AppFeature {
     }
 
     func start() {
-        guard pollTimer == nil else { return }
-        keyboardBuffer.start()
-
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                await self.updateFocusedInput()
-            }
-        }
-
-        if let pollTimer {
-            RunLoop.main.add(pollTimer, forMode: .common)
-        }
+        guard !isStarted else { return }
+        isStarted = true
+        updateAutomaticTriggerMonitoring()
 
         for rule in rules {
             registerShortcutHandler(for: rule)
@@ -57,10 +50,47 @@ final class WritingFixFeature: AppFeature {
     }
 
     func stop() {
+        guard isStarted else { return }
+        isStarted = false
         pollTimer?.invalidate()
         pollTimer = nil
-        keyboardBuffer.stop()
+        if isKeyboardBufferStarted {
+            keyboardBuffer.stop()
+            isKeyboardBufferStarted = false
+        }
         isFixing = false
+    }
+
+    private func updateAutomaticTriggerMonitoring() {
+        let needsMonitoring = rules.contains {
+            !$0.trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        guard needsMonitoring else {
+            pollTimer?.invalidate()
+            pollTimer = nil
+            if isKeyboardBufferStarted {
+                keyboardBuffer.stop()
+                isKeyboardBufferStarted = false
+            }
+            return
+        }
+
+        if !isKeyboardBufferStarted {
+            keyboardBuffer.start()
+            isKeyboardBufferStarted = true
+        }
+        guard pollTimer == nil else { return }
+
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.updateFocusedInput()
+            }
+        }
+        if let pollTimer {
+            RunLoop.main.add(pollTimer, forMode: .common)
+        }
     }
 
     private func registerShortcutHandler(for rule: WritingFixRule) {

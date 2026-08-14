@@ -25,9 +25,13 @@ final class AccessibilityPermissionManager: ObservableObject {
         }
     }
 
-    func refreshStatus() {
+    @discardableResult
+    func refreshStatus() -> Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
-        isTrusted = AXIsProcessTrustedWithOptions(options)
+        let newValue = AXIsProcessTrustedWithOptions(options)
+        guard newValue != isTrusted else { return false }
+        isTrusted = newValue
+        return true
     }
 
     func requestAccessIfNeeded() {

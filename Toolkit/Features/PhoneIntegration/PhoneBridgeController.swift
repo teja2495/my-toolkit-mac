@@ -37,7 +37,11 @@ final class PhoneBridgeController: ObservableObject {
     @Published private(set) var discoveredDevices: [DiscoveredPhoneDevice] = []
     @Published private(set) var trustedDevices: [PhoneTrustedDevice]
     @Published private(set) var pendingPairing: PendingPhonePairing?
-    @Published private(set) var connectionState: PhoneConnectionState = .idle
+    @Published private(set) var connectionState: PhoneConnectionState = .idle {
+        didSet {
+            updateClipboardMonitoringIfNeeded()
+        }
+    }
     @Published private(set) var fileItems: [PhoneFileItem] = []
     @Published private(set) var isLoadingFiles: Bool = false
     @Published private(set) var fileBrowserMessage: String = "Pair and connect to an Android phone to browse files."
@@ -53,7 +57,11 @@ final class PhoneBridgeController: ObservableObject {
     private let queue = DispatchQueue(label: "com.tk.toolkit.phone-bridge", qos: .userInitiated)
     private let logger = Logger(subsystem: "com.tk.toolkit", category: "PhoneBridge")
     private var browser: NWBrowser?
-    private var activePairing: ActivePairing?
+    private var activePairing: ActivePairing? {
+        didSet {
+            updateClipboardMonitoringIfNeeded()
+        }
+    }
     private var allDiscoveredDevices: [DiscoveredPhoneDevice] = []
     private var connectedServiceName: String?
     private var fileRequestRetryTask: Task<Void, Never>?
@@ -68,6 +76,7 @@ final class PhoneBridgeController: ObservableObject {
     private var activeIncomingShareTransfers: [String: IncomingShareTransfer] = [:]
     private var isStarted = false
     private var clipboardMonitorTimer: Timer?
+    private var isClipboardSyncEnabled = true
     private var lastObservedClipboardChangeCount: Int?
     private var lastSyncedClipboardText: String?
 
@@ -78,7 +87,7 @@ final class PhoneBridgeController: ObservableObject {
     func start() {
         guard browser == nil else { return }
         isStarted = true
-        startClipboardMonitoringIfNeeded()
+        updateClipboardMonitoringIfNeeded()
         logger.debug("Starting phone bridge browser")
         let browser = NWBrowser(
             for: .bonjourWithTXTRecord(type: PhoneBridgeProtocol.serviceType, domain: nil),
@@ -168,12 +177,10 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     func setClipboardSyncEnabled(_ isEnabled: Bool) {
-        guard isStarted else { return }
-        if isEnabled {
-            startClipboardMonitoringIfNeeded()
+        isClipboardSyncEnabled = isEnabled
+        updateClipboardMonitoringIfNeeded()
+        if isEnabled, isStarted {
             syncCurrentClipboardIfPossible(force: false)
-        } else {
-            stopClipboardMonitoring()
         }
     }
 
@@ -580,6 +587,9 @@ final class PhoneBridgeController: ObservableObject {
 
     private func startClipboardMonitoringIfNeeded() {
         guard isStarted else { return }
+        guard isClipboardSyncEnabled else { return }
+        guard activePairing != nil else { return }
+        guard case .connected = connectionState else { return }
         guard clipboardMonitorTimer == nil else { return }
         let pasteboard = NSPasteboard.general
         lastObservedClipboardChangeCount = pasteboard.changeCount
@@ -590,6 +600,21 @@ final class PhoneBridgeController: ObservableObject {
         }
         if let clipboardMonitorTimer {
             RunLoop.main.add(clipboardMonitorTimer, forMode: .common)
+        }
+    }
+
+    private func updateClipboardMonitoringIfNeeded() {
+        let isConnected: Bool
+        if case .connected = connectionState {
+            isConnected = activePairing != nil
+        } else {
+            isConnected = false
+        }
+
+        if isStarted, isClipboardSyncEnabled, isConnected {
+            startClipboardMonitoringIfNeeded()
+        } else {
+            stopClipboardMonitoring()
         }
     }
 
@@ -607,6 +632,7 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private func syncCurrentClipboardIfPossible(force: Bool) {
+        guard isClipboardSyncEnabled else { return }
         guard let activePairing else { return }
         guard let clipboardText = NSPasteboard.general.string(forType: .string) else { return }
         guard !clipboardText.isEmpty else { return }

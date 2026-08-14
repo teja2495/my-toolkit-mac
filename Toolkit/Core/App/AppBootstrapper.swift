@@ -277,12 +277,14 @@ final class AppBootstrapper: ObservableObject {
         permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.accessibilityPermissionManager.refreshStatus()
-                self.updateFeatureLifecycle()
+                if self.accessibilityPermissionManager.refreshStatus() {
+                    self.updateFeatureLifecycle()
+                }
             }
         }
 
         if let permissionRefreshTimer {
+            permissionRefreshTimer.tolerance = 0.1
             RunLoop.main.add(permissionRefreshTimer, forMode: .common)
         }
     }
