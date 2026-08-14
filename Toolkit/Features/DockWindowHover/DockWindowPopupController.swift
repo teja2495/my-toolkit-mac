@@ -918,20 +918,16 @@ private struct VSCodeFolderSearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 14, height: 14)
+                .frame(width: DockPopupRowStyle.iconSize, height: DockPopupRowStyle.iconSize)
 
             VSCodeFolderSearchTextField(text: $text, onFocus: onFocus)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
+        .frame(height: DockPopupRowStyle.height)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: DockPopupRowStyle.cornerRadius, style: .continuous)
                 .fill(Color.white.opacity(0.07))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
         )
     }
 }
@@ -1235,7 +1231,7 @@ private struct WindowRow: View {
                 Image(nsImage: icon)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: 28, height: 28)
+                    .frame(width: DockPopupRowStyle.iconSize, height: DockPopupRowStyle.iconSize)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1267,9 +1263,9 @@ private struct WindowRow: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
+        .frame(height: DockPopupRowStyle.height)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: DockPopupRowStyle.cornerRadius, style: .continuous)
                 .fill(Color.white.opacity(0.07))
         )
         .contentShape(Rectangle())
@@ -1295,4 +1291,10 @@ private struct WindowRow: View {
             row
         }
     }
+}
+
+private enum DockPopupRowStyle {
+    static let height: CGFloat = 44
+    static let iconSize: CGFloat = 28
+    static let cornerRadius: CGFloat = 12
 }
