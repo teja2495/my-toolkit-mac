@@ -587,17 +587,20 @@ final class DockWindowPopupController {
     }
 
     private func quitApplication(processIdentifier: pid_t) {
+        // Dismiss immediately so the popup never lingers while the app handles its quit flow.
+        hide()
         guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
         _ = app.terminate()
         Task { @MainActor in
             await waitForApplicationTransition {
                 app.isTerminated
             }
-            hide()
         }
     }
 
     private func restartApplication(processIdentifier: pid_t) {
+        // Dismiss immediately; termination and relaunch can take a few seconds.
+        hide()
         guard let app = NSRunningApplication(processIdentifier: processIdentifier),
               let bundleURL = app.bundleURL else { return }
         let bundleIdentifier = app.bundleIdentifier
@@ -620,7 +623,6 @@ final class DockWindowPopupController {
             }
 
             guard didTerminate else {
-                hide()
                 return
             }
 
@@ -651,19 +653,18 @@ final class DockWindowPopupController {
                     try? process.run()
                 }
             }
-
-            hide()
         }
     }
 
     private func forceQuitApplication(processIdentifier: pid_t) {
+        // Dismiss immediately rather than waiting for force termination to finish.
+        hide()
         guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
         _ = app.forceTerminate()
         Task { @MainActor in
             await waitForApplicationTransition {
                 app.isTerminated
             }
-            hide()
         }
     }
 
