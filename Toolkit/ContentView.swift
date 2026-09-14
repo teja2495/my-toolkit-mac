@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var bootstrapper: AppBootstrapper
-    @State private var selection: SettingsSection?
+    @State private var selection: SettingsSection? = .feature("phone-integration")
 
     var body: some View {
         NavigationSplitView {
@@ -28,21 +28,6 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .containerBackground(Color(nsColor: .windowBackgroundColor), for: .window)
-        .onAppear {
-            if selection == nil {
-                selection = defaultSelection
-            }
-        }
-    }
-
-    private var defaultSelection: SettingsSection {
-        if bootstrapper.availableFeatures.contains(where: { $0.id == "phone-integration" }) {
-            return .feature("phone-integration")
-        }
-        if let firstFeature = bootstrapper.availableFeatures.first {
-            return .feature(firstFeature.id)
-        }
-        return .permissions
     }
 }
 

@@ -6,11 +6,12 @@ import UniformTypeIdentifiers
 struct PhoneIntegrationSettingsView: View {
     @ObservedObject var bootstrapper: AppBootstrapper
     @ObservedObject private var controller: PhoneBridgeController
-    @State private var isShowingTrustedDevices = false
+    @State private var isTrustedDevicesExpanded = false
     @State private var isConnectionCardExpanded = true
     @State private var lastAutoCollapseConnectionState: Bool?
     @State private var isTargetedByFileDrop = false
     @State private var isDraggingPhoneFileOut = false
+    @State private var hoveredFileID: String?
     @State private var actionErrorMessage: String?
     @State private var localMouseUpMonitor: Any?
     @State private var globalMouseUpMonitor: Any?
@@ -78,15 +79,16 @@ struct PhoneIntegrationSettingsView: View {
         .onAppear {
             installDragResetMonitorsIfNeeded()
             syncConnectionCardExpansion(forceInitial: true)
+            controller.refreshConnectionData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            controller.refreshConnectionData()
         }
         .onChange(of: isCurrentlyConnected) { _ in
             syncConnectionCardExpansion(forceInitial: false)
         }
         .onDisappear {
             removeDragResetMonitors()
-        }
-        .sheet(isPresented: $isShowingTrustedDevices) {
-            trustedDevicesSheet
         }
         .alert(
             "Phone File Action Failed",
@@ -138,14 +140,8 @@ struct PhoneIntegrationSettingsView: View {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack(spacing: 10) {
-                                    Button("Trusted Devices") {
-                                        isShowingTrustedDevices = true
-                                    }
-                                    .controlSize(.small)
-
                                     Button("Refresh") {
-                                        controller.stop()
-                                        controller.start()
+                                        controller.refreshConnectionData()
                                     }
                                     .controlSize(.small)
 
@@ -198,6 +194,10 @@ struct PhoneIntegrationSettingsView: View {
 
                         Divider()
 
+                        trustedDevicesSection
+
+                        Divider()
+
                         SettingsRow("Sync Mac clipboard to phone") {
                             Toggle("", isOn: $bootstrapper.phoneClipboardSyncEnabled)
                                 .labelsHidden()
@@ -236,51 +236,60 @@ struct PhoneIntegrationSettingsView: View {
         }
     }
 
-    private var trustedDevicesSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if controller.trustedDevices.isEmpty {
-                        Text("No Android phones are paired yet.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(controller.trustedDevices) { device in
-                            HStack(spacing: 12) {
-                                Image(systemName: "checkmark.shield")
-                                    .foregroundStyle(.green)
-                                    .frame(width: 18)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(device.name)
-                                        .font(.system(size: 13))
-                                    Text("Last seen \(device.lastSeenAt.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button {
-                                    controller.removeTrustedDevice(id: device.id)
-                                } label: {
-                                    Image(systemName: "trash")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Remove paired device")
-                            }
-                        }
-                    }
+    private var trustedDevicesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isTrustedDevicesExpanded.toggle()
                 }
-                .padding(20)
+            } label: {
+                HStack(spacing: 10) {
+                    Text("Paired Devices")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("\(controller.trustedDevices.count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: isTrustedDevicesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            .navigationTitle("Trusted Devices")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        isShowingTrustedDevices = false
+            .buttonStyle(.plain)
+
+            if isTrustedDevicesExpanded {
+                if controller.trustedDevices.isEmpty {
+                    Text("No Android phones are paired yet.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(controller.trustedDevices) { device in
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.shield")
+                                .foregroundStyle(.green)
+                                .frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(device.name)
+                                    .font(.system(size: 13))
+                                Text("Last seen \(device.lastSeenAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                controller.removeTrustedDevice(id: device.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove paired device")
+                        }
                     }
                 }
             }
         }
-        .frame(minWidth: 420, minHeight: 280)
     }
 
     private var isCurrentlyConnected: Bool {
@@ -396,7 +405,9 @@ struct PhoneIntegrationSettingsView: View {
             with: "",
             options: .regularExpression
         )
-        let baseName = controller.trustedDeviceName(for: device) ?? fallbackName
+        let baseName = controller.trustedDeviceName(for: device)
+            ?? device.advertisedDeviceName
+            ?? fallbackName
         let displayID = shortDeviceIdentifier(for: device.advertisedDeviceId ?? device.id)
         guard !displayID.isEmpty else { return baseName }
         return "\(baseName) \(displayID)"
@@ -443,25 +454,38 @@ struct PhoneIntegrationSettingsView: View {
     }
 
     private func photoGridItem(for file: PhoneFileItem) -> some View {
-        Button {
-            openFile(file)
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                PhoneFileThumbnailView(file: file)
-                    .frame(height: 150)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                
-                if file.mimeType.hasPrefix("video/") {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.white.opacity(0.96))
-                        .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
-                        .padding(8)
+        ZStack(alignment: .topTrailing) {
+            Button {
+                openFile(file)
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    PhoneFileThumbnailView(file: file)
+                        .frame(height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                    if file.mimeType.hasPrefix("video/") {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.white.opacity(0.96))
+                            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                            .padding(8)
+                    }
                 }
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if hoveredFileID == file.id {
+                fileHoverActions(for: file)
+                    .padding(8)
+                    .transition(.opacity)
+            }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredFileID = isHovered ? file.id : nil
+            }
+        }
         .onDrag {
             dragItemProvider(for: file)
         }
@@ -471,36 +495,90 @@ struct PhoneIntegrationSettingsView: View {
     }
 
     private func otherGridItem(for file: PhoneFileItem) -> some View {
-        Button {
-            openFile(file)
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                PhoneFileThumbnailView(file: file)
-                    .frame(height: 132)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        ZStack(alignment: .topTrailing) {
+            Button {
+                openFile(file)
+            } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    PhoneFileThumbnailView(file: file)
+                        .frame(height: 132)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(file.filename)
-                        .font(.system(size: 13.5, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(file.filename)
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
 
-                    Text(fileMetadataText(for: file))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        Text(fileMetadataText(for: file))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if hoveredFileID == file.id {
+                fileHoverActions(for: file)
+                    .padding(8)
+                    .transition(.opacity)
+            }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered in
+            withAnimation(.easeOut(duration: 0.12)) {
+                hoveredFileID = isHovered ? file.id : nil
+            }
+        }
         .onDrag {
             dragItemProvider(for: file)
         }
         .contextMenu {
             fileContextMenu(for: file)
         }
+    }
+
+    private func fileHoverActions(for file: PhoneFileItem) -> some View {
+        HStack(spacing: 6) {
+            fileHoverActionButton(
+                systemImage: "doc.on.doc",
+                help: "Copy to Clipboard"
+            ) {
+                copyFileToClipboard(file)
+            }
+
+            fileHoverActionButton(
+                systemImage: "arrow.down.to.line",
+                help: "Download"
+            ) {
+                downloadFile(file)
+            }
+        }
+    }
+
+    private func fileHoverActionButton(
+        systemImage: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 28, height: 28)
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.5)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 4, y: 1)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func openFile(_ file: PhoneFileItem) {

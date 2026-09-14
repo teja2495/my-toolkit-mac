@@ -33,6 +33,7 @@ private final class VSCodeFolderSearchModel: ObservableObject {
         didSet { refreshResults() }
     }
     @Published private(set) var results: [VSCodeSearchFolder] = []
+    @Published private(set) var selectedResultID: String?
 
     var onResultsChanged: (() -> Void)?
 
@@ -46,9 +47,34 @@ private final class VSCodeFolderSearchModel: ObservableObject {
     func reset() {
         if query.isEmpty {
             results = []
+            selectedResultID = nil
             return
         }
         query = ""
+    }
+
+    func selectNextResult() {
+        moveSelection(by: 1)
+    }
+
+    func selectPreviousResult() {
+        moveSelection(by: -1)
+    }
+
+    private func moveSelection(by offset: Int) {
+        guard !results.isEmpty else {
+            selectedResultID = nil
+            return
+        }
+
+        guard let selectedResultID,
+              let selectedIndex = results.firstIndex(where: { $0.id == selectedResultID }) else {
+            self.selectedResultID = offset > 0 ? results.first?.id : results.last?.id
+            return
+        }
+
+        let nextIndex = (selectedIndex + offset + results.count) % results.count
+        self.selectedResultID = results[nextIndex].id
     }
 
     private func refreshResults() {
@@ -65,6 +91,9 @@ private final class VSCodeFolderSearchModel: ObservableObject {
         }
         guard nextResults != results else { return }
         results = nextResults
+        if !nextResults.contains(where: { $0.id == selectedResultID }) {
+            selectedResultID = nextResults.first?.id
+        }
         onResultsChanged?()
     }
 
@@ -771,6 +800,7 @@ private struct DockWindowPopupView: View {
                             icon: appIcon,
                             title: shortcutDisplayName(for: shortcut.path),
                             subtitle: nil,
+                            isSelected: false,
                             onOpen: { onOpenVSCodeFolder(shortcut) },
                             onClose: nil,
                             onPin: nil,
@@ -785,6 +815,7 @@ private struct DockWindowPopupView: View {
                         icon: appIcon,
                         title: folder.name,
                         subtitle: folder.subtitle,
+                        isSelected: vscodeFolderSearch.selectedResultID == folder.id,
                         onOpen: {
                             onOpenVSCodeFolder(VSCodeFolderShortcut(path: folder.path))
                         },
@@ -798,7 +829,10 @@ private struct DockWindowPopupView: View {
 
                 VSCodeFolderSearchField(
                     text: $vscodeFolderSearch.query,
-                    onFocus: onFocusSearchField
+                    onFocus: onFocusSearchField,
+                    onMoveUp: vscodeFolderSearch.selectPreviousResult,
+                    onMoveDown: vscodeFolderSearch.selectNextResult,
+                    onSubmit: openSelectedVSCodeSearchResult
                 )
                 } else {
                     if !hideWindowsList {
@@ -807,6 +841,7 @@ private struct DockWindowPopupView: View {
                                 icon: appIcon,
                                 title: window.title,
                                 subtitle: nil,
+                                isSelected: false,
                                 onOpen: { onOpen(window) },
                                 onClose: { onClose(window) },
                                 onPin: nil,
@@ -820,6 +855,7 @@ private struct DockWindowPopupView: View {
                             icon: appIcon,
                             title: "New Window",
                             subtitle: nil,
+                            isSelected: false,
                             onOpen: onNewWindow,
                             onClose: nil,
                             onPin: nil,
@@ -854,6 +890,14 @@ private struct DockWindowPopupView: View {
             .standardizedFileURL
             .path
         return vscodePinnedFolders.folders.first { $0.path == standardizedPath }
+    }
+
+    private func openSelectedVSCodeSearchResult() {
+        let selectedFolder = vscodeFolderSearch.results.first {
+            $0.id == vscodeFolderSearch.selectedResultID
+        }
+        guard let folder = selectedFolder ?? vscodeFolderSearch.results.first else { return }
+        onOpenVSCodeFolder(VSCodeFolderShortcut(path: folder.path))
     }
 }
 
@@ -912,6 +956,9 @@ private struct AppControlButton: View {
 private struct VSCodeFolderSearchField: View {
     @Binding var text: String
     let onFocus: () -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onSubmit: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -920,7 +967,13 @@ private struct VSCodeFolderSearchField: View {
                 .foregroundStyle(.secondary)
                 .frame(width: DockPopupRowStyle.iconSize, height: DockPopupRowStyle.iconSize)
 
-            VSCodeFolderSearchTextField(text: $text, onFocus: onFocus)
+            VSCodeFolderSearchTextField(
+                text: $text,
+                onFocus: onFocus,
+                onMoveUp: onMoveUp,
+                onMoveDown: onMoveDown,
+                onSubmit: onSubmit
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 12)
@@ -935,9 +988,18 @@ private struct VSCodeFolderSearchField: View {
 private struct VSCodeFolderSearchTextField: NSViewRepresentable {
     @Binding var text: String
     let onFocus: () -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onFocus: onFocus)
+        Coordinator(
+            text: $text,
+            onFocus: onFocus,
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown,
+            onSubmit: onSubmit
+        )
     }
 
     func makeNSView(context: Context) -> FocusAwareSearchField {
@@ -964,6 +1026,9 @@ private struct VSCodeFolderSearchTextField: NSViewRepresentable {
             nsView.stringValue = text
         }
         context.coordinator.onFocus = onFocus
+        context.coordinator.onMoveUp = onMoveUp
+        context.coordinator.onMoveDown = onMoveDown
+        context.coordinator.onSubmit = onSubmit
         nsView.onFocus = { [weak nsView] in
             context.coordinator.onFocus()
             nsView?.window?.makeFirstResponder(nsView)
@@ -973,11 +1038,23 @@ private struct VSCodeFolderSearchTextField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var text: Binding<String>
         var onFocus: () -> Void
+        var onMoveUp: () -> Void
+        var onMoveDown: () -> Void
+        var onSubmit: () -> Void
         weak var field: FocusAwareSearchField?
 
-        init(text: Binding<String>, onFocus: @escaping () -> Void) {
+        init(
+            text: Binding<String>,
+            onFocus: @escaping () -> Void,
+            onMoveUp: @escaping () -> Void,
+            onMoveDown: @escaping () -> Void,
+            onSubmit: @escaping () -> Void
+        ) {
             self.text = text
             self.onFocus = onFocus
+            self.onMoveUp = onMoveUp
+            self.onMoveDown = onMoveDown
+            self.onSubmit = onSubmit
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
@@ -987,6 +1064,26 @@ private struct VSCodeFolderSearchTextField: NSViewRepresentable {
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
             text.wrappedValue = field.stringValue
+        }
+
+        func control(
+            _ control: NSControl,
+            textView: NSTextView,
+            doCommandBy commandSelector: Selector
+        ) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.moveUp(_:)):
+                onMoveUp()
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                onMoveDown()
+                return true
+            case #selector(NSResponder.insertNewline(_:)):
+                onSubmit()
+                return true
+            default:
+                return false
+            }
         }
     }
 }
@@ -1216,6 +1313,7 @@ private struct WindowRow: View {
     let icon: NSImage?
     let title: String
     let subtitle: String?
+    let isSelected: Bool
     let onOpen: (() -> Void)?
     let onClose: (() -> Void)?
     let onPin: (() -> Void)?
@@ -1266,7 +1364,7 @@ private struct WindowRow: View {
         .frame(height: DockPopupRowStyle.height)
         .background(
             RoundedRectangle(cornerRadius: DockPopupRowStyle.cornerRadius, style: .continuous)
-                .fill(Color.white.opacity(0.07))
+                .fill(isSelected ? Color.accentColor.opacity(0.34) : Color.white.opacity(0.07))
         )
         .contentShape(Rectangle())
         .onTapGesture {

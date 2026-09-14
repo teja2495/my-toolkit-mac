@@ -33,6 +33,7 @@ struct DiscoveredPhoneDevice: Identifiable, Equatable {
     let name: String
     let endpoint: NWEndpoint
     let advertisedDeviceId: String?
+    let advertisedDeviceName: String?
 }
 
 struct PendingPhonePairing: Identifiable, Equatable {

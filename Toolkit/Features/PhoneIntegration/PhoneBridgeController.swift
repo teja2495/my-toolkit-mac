@@ -79,6 +79,7 @@ final class PhoneBridgeController: ObservableObject {
     private var isClipboardSyncEnabled = true
     private var lastObservedClipboardChangeCount: Int?
     private var lastSyncedClipboardText: String?
+    private var lastConnectionDataRefreshAt = Date.distantPast
 
     init() {
         trustedDevices = store.trustedDevices()
@@ -112,23 +113,32 @@ final class PhoneBridgeController: ObservableObject {
             }
         }
         browser.browseResultsChangedHandler = { [weak self] results, _ in
-            let devices = results.compactMap { result -> DiscoveredPhoneDevice? in
+            var devicesByID: [String: DiscoveredPhoneDevice] = [:]
+            for result in results {
                 guard case let .service(name: name, type: _, domain: _, interface: _) = result.endpoint else {
-                    return nil
+                    continue
                 }
                 let advertisedDeviceId: String?
+                let advertisedDeviceName: String?
                 if case let .bonjour(txtRecord) = result.metadata {
                     advertisedDeviceId = txtRecord.dictionary["deviceId"]
+                    advertisedDeviceName = txtRecord.dictionary["deviceName"]
                 } else {
                     advertisedDeviceId = nil
+                    advertisedDeviceName = nil
                 }
-                return DiscoveredPhoneDevice(
+                let device = DiscoveredPhoneDevice(
                     id: advertisedDeviceId ?? name,
                     name: name,
                     endpoint: result.endpoint,
-                    advertisedDeviceId: advertisedDeviceId
+                    advertisedDeviceId: advertisedDeviceId,
+                    advertisedDeviceName: advertisedDeviceName
                 )
+                if devicesByID[device.id] == nil {
+                    devicesByID[device.id] = device
+                }
             }
+            let devices = Array(devicesByID.values)
             Task { @MainActor in
                 self?.allDiscoveredDevices = devices.sorted {
                     $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -184,6 +194,21 @@ final class PhoneBridgeController: ObservableObject {
         }
     }
 
+    func refreshConnectionData() {
+        let now = Date()
+        guard now.timeIntervalSince(lastConnectionDataRefreshAt) >= 0.5 else { return }
+        lastConnectionDataRefreshAt = now
+        trustedDevices = store.trustedDevices()
+
+        if activePairing != nil || pendingPairing != nil {
+            refreshDiscoveredDevices()
+            return
+        }
+
+        stop()
+        start()
+    }
+
     func pair(with device: DiscoveredPhoneDevice) {
         logger.debug("Pair requested for service=\(device.name, privacy: .public)")
         activePairing?.connection.cancel()
@@ -197,7 +222,7 @@ final class PhoneBridgeController: ObservableObject {
             case .ready:
                 Task { @MainActor in
                     self?.logger.debug("Connection ready for service=\(device.name, privacy: .public)")
-                    self?.sendPairHello(to: connection, discoveredServiceName: device.name)
+                    self?.sendPairHello(to: connection, device: device)
                 }
             case .failed(let error):
                 Task { @MainActor in
@@ -376,7 +401,7 @@ final class PhoneBridgeController: ObservableObject {
         return trustedDevices.first(where: { $0.name == device.name })?.name
     }
 
-    private func sendPairHello(to connection: NWConnection, discoveredServiceName: String) {
+    private func sendPairHello(to connection: NWConnection, device: DiscoveredPhoneDevice) {
         do {
             let identity = try crypto.getOrCreateIdentityKey()
             let publicKey = crypto.publicKeyBase64(identity.publicKey)
@@ -386,15 +411,16 @@ final class PhoneBridgeController: ObservableObject {
                 "deviceId": store.deviceId(),
                 "deviceName": Host.current().localizedName ?? "Mac",
                 "platform": "macos",
-                "publicKey": publicKey
+                "publicKey": publicKey,
+                "trustedPeer": isTrustedDiscoveredDevice(device)
             ]
-            logger.debug("Sending pair.hello to service=\(discoveredServiceName, privacy: .public)")
+            logger.debug("Sending pair.hello to service=\(device.name, privacy: .public)")
             try sendFrame(json: payload, connection: connection)
             receivePairChallenge(
                 connection: connection,
                 identity: identity,
                 localPublicKeyBase64: publicKey,
-                discoveredServiceName: discoveredServiceName
+                discoveredServiceName: device.name
             )
         } catch {
             Task { @MainActor in
@@ -446,7 +472,8 @@ final class PhoneBridgeController: ObservableObject {
                     )
                     self.activePairing = pairing
                     self.connectionState = .pairing
-                    if self.shouldAutoApproveTrustedDevice(
+                    let remoteTrustsThisMac = json["trustedPeer"] as? Bool ?? false
+                    if remoteTrustsThisMac, self.shouldAutoApproveTrustedDevice(
                         deviceId: deviceId,
                         remotePublicKeyBase64: remotePublicKeyBase64
                     ) {
