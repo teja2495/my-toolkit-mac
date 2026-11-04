@@ -635,54 +635,85 @@ final class DockWindowPopupController {
         let bundleIdentifier = app.bundleIdentifier
 
         // Capture path up front; NSRunningApplication may become stale after quit.
-        let launchURL = bundleURL
+        let launchURL = bundleURL.standardizedFileURL
+        let oldPID = processIdentifier
         _ = app.terminate()
 
         Task { @MainActor in
-            var didTerminate = await waitForApplicationTransition(timeout: 4) {
-                app.isTerminated
-            }
+            // Use the kernel process table as the source of truth; NSRunningApplication
+            // state can lag behind the actual process exit.
+            let hasExited = { app.isTerminated && !Self.isProcessAlive(oldPID) }
+
+            var didTerminate = await waitForApplicationTransition(timeout: 8, condition: hasExited)
 
             // Soft quit can hang on save sheets; escalate so restart always completes.
             if !didTerminate {
                 _ = app.forceTerminate()
-                didTerminate = await waitForApplicationTransition(timeout: 3) {
-                    app.isTerminated
-                }
+                didTerminate = await waitForApplicationTransition(timeout: 3, condition: hasExited)
+            }
+            if !didTerminate {
+                kill(oldPID, SIGKILL)
+                _ = await waitForApplicationTransition(timeout: 3) { !Self.isProcessAlive(oldPID) }
             }
 
-            guard didTerminate else {
-                return
-            }
-
-            // Wait until Launch Services no longer lists this app as running.
-            if let bundleIdentifier {
-                _ = await waitForApplicationTransition(timeout: 3) {
-                    !NSWorkspace.shared.runningApplications.contains {
-                        $0.bundleIdentifier == bundleIdentifier && !$0.isTerminated
-                    }
-                }
+            // Wait until Launch Services no longer lists this app as running; otherwise
+            // a launch request just "activates" the dying instance and nothing comes back.
+            _ = await waitForApplicationTransition(timeout: 5) {
+                Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL).isEmpty
             }
 
             // Brief settle so relaunch is not rejected as a duplicate launch.
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 300_000_000)
 
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.activates = true
-            configuration.createsNewApplicationInstance = false
+            // Retry until a fresh instance is confirmed running.
+            for attempt in 0..<5 {
+                await Self.launchApplication(at: launchURL, useOpenCommand: attempt >= 2)
 
-            do {
-                _ = try await NSWorkspace.shared.openApplication(at: launchURL, configuration: configuration)
-            } catch {
-                // Fallbacks for apps that reject openApplication after a forced quit.
-                if !NSWorkspace.shared.open(launchURL) {
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                    process.arguments = [launchURL.path]
-                    try? process.run()
+                let relaunched = await waitForApplicationTransition(timeout: 4) {
+                    Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL)
+                        .contains { $0.processIdentifier != oldPID }
                 }
+                if relaunched {
+                    Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL)
+                        .first { $0.processIdentifier != oldPID }?
+                        .activate()
+                    return
+                }
+
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
             }
         }
+    }
+
+    private static func isProcessAlive(_ pid: pid_t) -> Bool {
+        if kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+    }
+
+    private static func runningInstances(bundleIdentifier: String?, bundleURL: URL) -> [NSRunningApplication] {
+        NSWorkspace.shared.runningApplications.filter { candidate in
+            guard !candidate.isTerminated else { return false }
+            if let bundleIdentifier {
+                return candidate.bundleIdentifier == bundleIdentifier
+            }
+            return candidate.bundleURL?.standardizedFileURL == bundleURL
+        }
+    }
+
+    private static func launchApplication(at url: URL, useOpenCommand: Bool) async {
+        if useOpenCommand {
+            // Fallback for apps that ignore openApplication right after a quit.
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = [url.path]
+            try? process.run()
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = false
+        _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
     private func forceQuitApplication(processIdentifier: pid_t) {
