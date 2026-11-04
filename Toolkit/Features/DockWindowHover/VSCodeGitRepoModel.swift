@@ -116,30 +116,70 @@ final class VSCodeGitRepoModel: ObservableObject {
         let failureMessage: String?
     }
 
-    private static let commitPrompt = """
-    You are committing and pushing the pending changes in this git repository.
+    private static let maxDiffCharacters = 60_000
 
-    1. Inspect the uncommitted changes (staged, unstaged, and untracked files) using `git status` and `git diff` (include `git diff --cached`).
-    2. Look at `git log -n 10 --oneline` and match the style of the existing commit messages.
-    3. Write a concise, descriptive commit message summarizing the changes.
-    4. Stage everything with `git add -A` and commit with that message.
-    5. Push the current branch. If it has no upstream, use `git push -u origin HEAD`.
+    /// Collects status, diff, and log up front so Codex can go straight to
+    /// committing instead of spending model turns inspecting the repo.
+    private static func commitPrompt(for path: String) async -> String {
+        async let status = gitOutput(["status", "--porcelain=v1", "--branch"], in: path)
+        async let stat = gitOutput(["diff", "HEAD", "--stat"], in: path)
+        async let diff = gitOutput(["diff", "HEAD"], in: path)
+        async let untracked = gitOutput(["ls-files", "--others", "--exclude-standard"], in: path)
+        async let log = gitOutput(["log", "-n", "10", "--oneline"], in: path)
 
-    Rules: do not edit, create, or delete any files; do not amend, rebase, force-push, or rewrite history. If any step fails, stop and explain the error.
-    When finished, reply with only the commit subject line.
-    """
+        var diffText = await diff
+        if diffText.count > maxDiffCharacters {
+            diffText = String(diffText.prefix(maxDiffCharacters)) + "\n… (diff truncated; rely on the stat summary for the rest)"
+        }
+
+        return """
+        Commit and push the pending changes in this git repository. All the context you need is below, so do not run any inspection commands.
+
+        Write a concise, descriptive commit message for these changes that matches the style of the recent commits. Then run exactly one shell command:
+        git add -A && git commit -m "<subject>" [-m "<body>"] && git push
+        If the branch has no upstream (no "..." in the status header line), use `git push -u origin HEAD` instead of `git push`.
+
+        Rules: do not edit, create, or delete any files; do not amend, rebase, force-push, or rewrite history. If the command fails, explain the error.
+        When finished, reply with only the commit subject line.
+
+        ## git status --branch
+        \(await status)
+
+        ## Recent commits
+        \(await log)
+
+        ## Untracked files (not shown in the diff)
+        \(await untracked)
+
+        ## git diff HEAD --stat
+        \(await stat)
+
+        ## git diff HEAD
+        \(diffText)
+        """
+    }
+
+    private static func gitOutput(_ arguments: [String], in path: String) async -> String {
+        let result = await ProcessRunner.run(executable: "/usr/bin/git", arguments: ["-C", path] + arguments)
+        let output = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return output.isEmpty ? "(none)" : output
+    }
 
     private static func runCodexCommitAndPush(in path: String) async -> CodexResult {
+        let prompt = await commitPrompt(for: path)
         let result = await ProcessRunner.run(
             executable: "/usr/bin/env",
             arguments: [
                 "codex",
                 "exec",
                 "--cd", path,
+                // A commit message is a light task; a small model at low effort is much faster.
+                "--model", "gpt-5.6-luna",
+                "-c", "model_reasoning_effort=\"low\"",
                 // workspace-write keeps .git read-only, so commits need full access.
                 "--sandbox", "danger-full-access",
                 "--ephemeral",
-                commitPrompt
+                prompt
             ],
             currentDirectory: path
         )
