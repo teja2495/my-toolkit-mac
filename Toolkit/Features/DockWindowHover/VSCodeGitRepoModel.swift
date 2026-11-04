@@ -14,6 +14,7 @@ enum VSCodeRepoCommitState: Equatable {
 final class VSCodeGitRepoModel: ObservableObject {
     @Published private(set) var dirtyPaths: Set<String> = []
     @Published private(set) var commitStates: [String: VSCodeRepoCommitState] = [:]
+    @Published private(set) var branchNames: [String: String] = [:]
 
     var onChange: (() -> Void)?
 
@@ -30,10 +31,16 @@ final class VSCodeGitRepoModel: ObservableObject {
 
         Task { @MainActor in
             let dirty = await Self.dirtyRepositories(in: repoPaths)
+            let branches = await Self.branchNames(in: Array(dirty))
             guard generation == refreshGeneration else { return }
             let nextDirtyPaths = dirtyPaths.subtracting(repoPaths).union(dirty)
-            guard nextDirtyPaths != dirtyPaths else { return }
+            var nextBranchNames = branchNames
+            for path in repoPaths {
+                nextBranchNames[path] = branches[path]
+            }
+            guard nextDirtyPaths != dirtyPaths || nextBranchNames != branchNames else { return }
             dirtyPaths = nextDirtyPaths
+            branchNames = nextBranchNames
             onChange?()
         }
     }
@@ -98,6 +105,36 @@ final class VSCodeGitRepoModel: ObservableObject {
         )
         return result.status == 0
             && !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func branchNames(in paths: [String]) async -> [String: String] {
+        await withTaskGroup(of: (String, String?).self) { group in
+            for path in paths {
+                group.addTask { (path, await currentBranch(at: path)) }
+            }
+            var names: [String: String] = [:]
+            for await (path, name) in group {
+                if let name { names[path] = name }
+            }
+            return names
+        }
+    }
+
+    /// The checked-out branch, or the short commit hash when HEAD is detached.
+    private static func currentBranch(at path: String) async -> String? {
+        let branch = await ProcessRunner.run(
+            executable: "/usr/bin/git",
+            arguments: ["-C", path, "branch", "--show-current"]
+        )
+        let name = branch.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if branch.status == 0, !name.isEmpty { return name }
+
+        let head = await ProcessRunner.run(
+            executable: "/usr/bin/git",
+            arguments: ["-C", path, "rev-parse", "--short", "HEAD"]
+        )
+        let hash = head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return head.status == 0 && !hash.isEmpty ? hash : nil
     }
 
     private static func unpushedCommitCount(at path: String) async -> Int {

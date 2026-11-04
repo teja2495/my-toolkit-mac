@@ -977,7 +977,11 @@ private struct DockWindowPopupView: View {
     private func gitAction(for path: String) -> WindowRowGitAction? {
         let state = vscodeGitRepos.commitStates[path]
         guard state != nil || vscodeGitRepos.isDirty(path) else { return nil }
-        return WindowRowGitAction(state: state, onCommitAndPush: { onCommitAndPush(path) })
+        return WindowRowGitAction(
+            state: state,
+            branchName: vscodeGitRepos.branchNames[path],
+            onCommitAndPush: { onCommitAndPush(path) }
+        )
     }
 
     private func pinnedShortcut(for path: String) -> VSCodeFolderShortcut? {
@@ -1433,7 +1437,17 @@ private struct WindowRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(.primary)
-                if let subtitle {
+                if let branchName = gitAction?.branchName {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(branchName)
+                            .font(.system(size: 10, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .foregroundStyle(.secondary)
+                } else if let subtitle {
                     Text(subtitle)
                         .font(.system(size: 10, design: .monospaced))
                         .lineLimit(1)
@@ -1492,6 +1506,7 @@ private struct WindowRow: View {
 
 private struct WindowRowGitAction {
     let state: VSCodeRepoCommitState?
+    let branchName: String?
     let onCommitAndPush: () -> Void
 }
 
