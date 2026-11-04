@@ -37,7 +37,7 @@ private final class VSCodeFolderSearchModel: ObservableObject {
 
     var onResultsChanged: (() -> Void)?
 
-    private var indexedFolders: [VSCodeSearchFolder] = []
+    @Published private(set) var indexedFolders: [VSCodeSearchFolder] = []
 
     func prepare() {
         indexedFolders = Self.loadFolders()
@@ -143,12 +143,28 @@ private final class VSCodePinnedFoldersModel: ObservableObject {
     @Published var folders: [VSCodeFolderShortcut] = []
 }
 
+/// Unpinned project folders with uncommitted changes (or an in-flight commit),
+/// shown automatically below the pinned folders.
+@MainActor
+private func vscodeAutoDirtyFolders(
+    search: VSCodeFolderSearchModel,
+    pinned: VSCodePinnedFoldersModel,
+    gitRepos: VSCodeGitRepoModel
+) -> [VSCodeSearchFolder] {
+    let pinnedPaths = Set(pinned.folders.map(\.path))
+    return search.indexedFolders.filter { folder in
+        !pinnedPaths.contains(folder.path)
+            && (gitRepos.isDirty(folder.path) || gitRepos.commitStates[folder.path] != nil)
+    }
+}
+
 @MainActor
 final class DockWindowPopupController {
     private let panel: DockHoverPanel
     private let windowProvider = AppWindowTitleProvider()
     private let vscodeFolderSearch = VSCodeFolderSearchModel()
     private let vscodePinnedFolders = VSCodePinnedFoldersModel()
+    private let vscodeGitRepos = VSCodeGitRepoModel()
     private var hostingController: NSHostingController<AnyView>
     private var latestFocusRequestID: UInt64 = 0
     private var initialWindowCount: Int = 0
@@ -181,6 +197,9 @@ final class DockWindowPopupController {
         vscodeFolderSearch.onResultsChanged = { [weak self] in
             self?.resizeForCurrentContent()
         }
+        vscodeGitRepos.onChange = { [weak self] in
+            self?.resizeForCurrentContent()
+        }
 
         makePanelHierarchyTransparent()
     }
@@ -200,6 +219,10 @@ final class DockWindowPopupController {
             vscodePinnedFolders.folders = vscodeFolderShortcuts
             vscodeFolderSearch.reset()
             vscodeFolderSearch.prepare()
+            vscodeGitRepos.refresh(
+                paths: vscodeFolderSearch.indexedFolders.map(\.path)
+                    + vscodeFolderShortcuts.map(\.path)
+            )
         }
         setView(for: app, windows: windows, hideWindowsList: hideWindowsList)
         let size = preferredSize(for: app, windows: windows, hideWindowsList: hideWindowsList)
@@ -247,6 +270,7 @@ final class DockWindowPopupController {
                 windows: Array(windows.prefix(8)),
                 vscodePinnedFolders: vscodePinnedFolders,
                 vscodeFolderSearch: vscodeFolderSearch,
+                vscodeGitRepos: vscodeGitRepos,
                 isVSCodeApp: isVSCodeApp,
                 showNewWindowButton: showNewWindowButton,
                 isAppFocused: isAppFocused,
@@ -288,6 +312,9 @@ final class DockWindowPopupController {
                 },
                 onUnpinVSCodeFolder: { [weak self] shortcut in
                     self?.unpinVSCodeFolder(shortcut)
+                },
+                onCommitAndPush: { [weak self] path in
+                    self?.vscodeGitRepos.commitAndPush(path: path)
                 },
                 onFocusSearchField: { [weak self] in
                     self?.makePanelKeyForSearch()
@@ -562,7 +589,12 @@ final class DockWindowPopupController {
             let isSearching = !vscodeFolderSearch.query
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty
-            let shortcutCount = isSearching ? 0 : vscodePinnedFolders.folders.count
+            let autoDirtyCount = vscodeAutoDirtyFolders(
+                search: vscodeFolderSearch,
+                pinned: vscodePinnedFolders,
+                gitRepos: vscodeGitRepos
+            ).count
+            let shortcutCount = isSearching ? 0 : vscodePinnedFolders.folders.count + autoDirtyCount
             let resultCount = vscodeFolderSearch.results.count
             let rowCount = shortcutCount + resultCount
             if rowCount > 0 {
@@ -783,6 +815,7 @@ private struct DockWindowPopupView: View {
     let windows: [WindowInfo]
     @ObservedObject var vscodePinnedFolders: VSCodePinnedFoldersModel
     @ObservedObject var vscodeFolderSearch: VSCodeFolderSearchModel
+    @ObservedObject var vscodeGitRepos: VSCodeGitRepoModel
     let isVSCodeApp: Bool
     let showNewWindowButton: Bool
     let isAppFocused: Bool
@@ -797,6 +830,7 @@ private struct DockWindowPopupView: View {
     let onOpenVSCodeFolder: (VSCodeFolderShortcut) -> Void
     let onPinVSCodeFolder: (String) -> Void
     let onUnpinVSCodeFolder: (VSCodeFolderShortcut) -> Void
+    let onCommitAndPush: (String) -> Void
     let onFocusSearchField: () -> Void
 
     var body: some View {
@@ -835,7 +869,30 @@ private struct DockWindowPopupView: View {
                             onOpen: { onOpenVSCodeFolder(shortcut) },
                             onClose: nil,
                             onPin: nil,
-                            onUnpin: { onUnpinVSCodeFolder(shortcut) }
+                            onUnpin: { onUnpinVSCodeFolder(shortcut) },
+                            gitAction: gitAction(for: shortcut.path)
+                        )
+                    }
+
+                    ForEach(
+                        vscodeAutoDirtyFolders(
+                            search: vscodeFolderSearch,
+                            pinned: vscodePinnedFolders,
+                            gitRepos: vscodeGitRepos
+                        )
+                    ) { folder in
+                        WindowRow(
+                            icon: appIcon,
+                            title: folder.name,
+                            subtitle: folder.subtitle,
+                            isSelected: false,
+                            onOpen: {
+                                onOpenVSCodeFolder(VSCodeFolderShortcut(path: folder.path))
+                            },
+                            onClose: nil,
+                            onPin: { onPinVSCodeFolder(folder.path) },
+                            onUnpin: nil,
+                            gitAction: gitAction(for: folder.path)
                         )
                     }
                 }
@@ -854,7 +911,8 @@ private struct DockWindowPopupView: View {
                         onPin: pinnedShortcut == nil ? { onPinVSCodeFolder(folder.path) } : nil,
                         onUnpin: pinnedShortcut.map { shortcut in
                             { onUnpinVSCodeFolder(shortcut) }
-                        }
+                        },
+                        gitAction: gitAction(for: folder.path)
                     )
                 }
 
@@ -914,6 +972,12 @@ private struct DockWindowPopupView: View {
         let resolvedPath = (path as NSString).expandingTildeInPath
         let folderName = URL(fileURLWithPath: resolvedPath).lastPathComponent
         return folderName.isEmpty ? resolvedPath : folderName
+    }
+
+    private func gitAction(for path: String) -> WindowRowGitAction? {
+        let state = vscodeGitRepos.commitStates[path]
+        guard state != nil || vscodeGitRepos.isDirty(path) else { return nil }
+        return WindowRowGitAction(state: state, onCommitAndPush: { onCommitAndPush(path) })
     }
 
     private func pinnedShortcut(for path: String) -> VSCodeFolderShortcut? {
@@ -1349,6 +1413,7 @@ private struct WindowRow: View {
     let onClose: (() -> Void)?
     let onPin: (() -> Void)?
     let onUnpin: (() -> Void)?
+    var gitAction: WindowRowGitAction? = nil
 
     private var hasContextActions: Bool {
         onPin != nil || onUnpin != nil
@@ -1377,6 +1442,9 @@ private struct WindowRow: View {
                 }
             }
             Spacer(minLength: 4)
+            if let gitAction {
+                GitCommitPushButton(action: gitAction)
+            }
             if let onClose {
                 Button(action: onClose) {
                     ZStack {
@@ -1418,6 +1486,60 @@ private struct WindowRow: View {
             }
         } else {
             row
+        }
+    }
+}
+
+private struct WindowRowGitAction {
+    let state: VSCodeRepoCommitState?
+    let onCommitAndPush: () -> Void
+}
+
+private struct GitCommitPushButton: View {
+    let action: WindowRowGitAction
+    private let size = CGSize(width: 34, height: 24)
+
+    var body: some View {
+        Button(action: action.onCommitAndPush) {
+            ZStack {
+                switch action.state {
+                case .running:
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                case .succeeded:
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.green)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                case nil:
+                    Image(systemName: "arrow.up.circle")
+                        .foregroundStyle(.white)
+                }
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .frame(width: size.width, height: size.height)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(action.state == .running || action.state == .succeeded)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        switch action.state {
+        case .running:
+            return "Codex is committing and pushing…"
+        case .succeeded:
+            return "Committed and pushed"
+        case .failed(let message):
+            return "Commit & push failed — click to retry.\n\(message)"
+        case nil:
+            return "Commit & push with Codex"
         }
     }
 }
