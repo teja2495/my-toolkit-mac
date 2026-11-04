@@ -79,6 +79,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
+            id: "openlogi",
+            title: "OpenLogi",
+            summary: "Customize the front, back, middle, and scroll wheel buttons on your mouse.",
+            requiresAccessibilityAccess: true,
+            isEnabled: false
+        ),
+        FeatureDescriptor(
             id: "miscellaneous",
             title: "Miscellaneous",
             summary: "Small system tweaks and utility behaviors.",
@@ -167,6 +174,26 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var openLogiButtonActions: [OpenLogiButton: MouseButtonAction] {
+        didSet {
+            for button in OpenLogiButton.allCases {
+                let action = openLogiButtonActions[button] ?? .systemDefault
+                UserDefaults.standard.set(action.rawValue, forKey: Self.openLogiButtonActionKey(for: button))
+            }
+            (liveFeatures["openlogi"] as? OpenLogiFeature)?.buttonActions = openLogiButtonActions
+        }
+    }
+
+    @Published var openLogiDoubleClickActions: [OpenLogiButton: MouseButtonAction] {
+        didSet {
+            for button in OpenLogiButton.allCases {
+                let action = openLogiDoubleClickActions[button] ?? .systemDefault
+                UserDefaults.standard.set(action.rawValue, forKey: Self.openLogiDoubleClickActionKey(for: button))
+            }
+            (liveFeatures["openlogi"] as? OpenLogiFeature)?.doubleClickActions = openLogiDoubleClickActions
+        }
+    }
+
     let accessibilityPermissionManager = AccessibilityPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
@@ -208,6 +235,8 @@ final class AppBootstrapper: ObservableObject {
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
+        openLogiButtonActions = Self.loadOpenLogiActions(key: Self.openLogiButtonActionKey(for:))
+        openLogiDoubleClickActions = Self.loadOpenLogiActions(key: Self.openLogiDoubleClickActionKey(for:))
         restoreFeatureEnabledStates()
         if resolvedDelay != savedDelay {
             UserDefaults.standard.set(resolvedDelay, forKey: Self.dockHoverPopupDelayKey)
@@ -308,6 +337,7 @@ final class AppBootstrapper: ObservableObject {
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())
+            ensureFeatureExists(OpenLogiFeature())
         } else {
             if let feature = liveFeatures.removeValue(forKey: "dock-window-hover") {
                 feature.stop()
@@ -317,6 +347,9 @@ final class AppBootstrapper: ObservableObject {
             }
             if let textExpanderFeature = liveFeatures.removeValue(forKey: "text-expander") {
                 textExpanderFeature.stop()
+            }
+            if let openLogiFeature = liveFeatures.removeValue(forKey: "openlogi") {
+                openLogiFeature.stop()
             }
         }
 
@@ -353,6 +386,10 @@ final class AppBootstrapper: ObservableObject {
             if let phoneIntegrationFeature = liveFeatures[feature.id] as? PhoneIntegrationFeature {
                 phoneIntegrationFeature.controller.setClipboardSyncEnabled(phoneClipboardSyncEnabled)
             }
+            if let openLogiFeature = liveFeatures[feature.id] as? OpenLogiFeature {
+                openLogiFeature.buttonActions = openLogiButtonActions
+                openLogiFeature.doubleClickActions = openLogiDoubleClickActions
+            }
             return
         }
 
@@ -376,6 +413,10 @@ final class AppBootstrapper: ObservableObject {
         if let phoneIntegrationFeature = feature as? PhoneIntegrationFeature {
             phoneIntegrationFeature.controller.setClipboardSyncEnabled(phoneClipboardSyncEnabled)
         }
+        if let openLogiFeature = feature as? OpenLogiFeature {
+            openLogiFeature.buttonActions = openLogiButtonActions
+            openLogiFeature.doubleClickActions = openLogiDoubleClickActions
+        }
         liveFeatures[feature.id] = feature
     }
 
@@ -386,6 +427,31 @@ final class AppBootstrapper: ObservableObject {
                 availableFeatures[index].isEnabled = isEnabled
             }
         }
+    }
+
+    private static func openLogiButtonActionKey(for button: OpenLogiButton) -> String {
+        switch button {
+        case .front: return "openLogiForwardButtonAction"
+        case .back: return "openLogiBackButtonAction"
+        // Keys predate the naming swap; kept so existing settings carry over.
+        case .scrollWheel: return "openLogiMiddleButtonAction"
+        case .middle: return "openLogiScrollWheelButtonAction"
+        }
+    }
+
+    private static func openLogiDoubleClickActionKey(for button: OpenLogiButton) -> String {
+        "openLogiDoubleClickAction.\(button.rawValue)"
+    }
+
+    private static func loadOpenLogiActions(
+        key: (OpenLogiButton) -> String
+    ) -> [OpenLogiButton: MouseButtonAction] {
+        var actions: [OpenLogiButton: MouseButtonAction] = [:]
+        for button in OpenLogiButton.allCases {
+            actions[button] = UserDefaults.standard.string(forKey: key(button))
+                .flatMap(MouseButtonAction.init(rawValue:)) ?? .systemDefault
+        }
+        return actions
     }
 
     private static func featureEnabledKey(for id: String) -> String {

@@ -10,8 +10,9 @@
 - Never run `git add` or `git commit` commands.
 - Follow existing architecture, folder structure, and UI patterns already present in the repo.
 - Keep features independent. Avoid cross-feature coupling unless there is a strong reason.
-- After every completed code-related task (skip documentation-only tasks), run this from repo root:
-  `pkill -f "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app/Contents/MacOS/Toolkit Debug" 2>/dev/null; xcodebuild -project /Users/teja2495/Projects/my-toolkit-mac/Toolkit.xcodeproj -scheme Toolkit -configuration Debug -derivedDataPath /tmp/toolkit-build build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)"; test ${pipestatus[1]} = 0 && { open -n "/tmp/toolkit-build/Build/Products/Debug/Toolkit Debug.app"; }`
+- After every completed code-related task (skip documentation-only tasks), build and install the Release app by running the `release-my-toolkit-mac` alias (defined in `~/.zshrc` as `release_my_toolkit_mac`) from repo root:
+  `/bin/zsh -ic 'release_my_toolkit_mac'`
+  It builds the Release configuration, quits the running `/Applications/Toolkit.app`, replaces it with the new build, and relaunches it.
 
 ## Feature Organization
 - Put standalone utilities in `Toolkit/Features/<FeatureName>/`.

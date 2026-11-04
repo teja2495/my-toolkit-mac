@@ -36,6 +36,8 @@ struct SettingsDetail: View {
             WritingFixSettingsView(bootstrapper: bootstrapper)
         case "text-expander":
             TextExpanderSettingsView(bootstrapper: bootstrapper)
+        case "openlogi":
+            OpenLogiSettingsView(bootstrapper: bootstrapper)
         case "miscellaneous":
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
         default:
