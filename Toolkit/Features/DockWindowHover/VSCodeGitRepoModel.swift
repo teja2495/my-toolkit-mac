@@ -13,8 +13,10 @@ enum VSCodeRepoCommitState: Equatable {
 @MainActor
 final class VSCodeGitRepoModel: ObservableObject {
     @Published private(set) var dirtyPaths: Set<String> = []
+    @Published private(set) var unpushedPaths: Set<String> = []
     @Published private(set) var commitStates: [String: VSCodeRepoCommitState] = [:]
     @Published private(set) var branchNames: [String: String] = [:]
+    @Published private(set) var runStates: [String: VSCodeRepoCommitState] = [:]
 
     var onChange: (() -> Void)?
 
@@ -24,22 +26,36 @@ final class VSCodeGitRepoModel: ObservableObject {
         dirtyPaths.contains(path)
     }
 
+    /// True when the repo has uncommitted changes or commits not yet pushed.
+    func hasPendingChanges(_ path: String) -> Bool {
+        dirtyPaths.contains(path) || unpushedPaths.contains(path)
+    }
+
     func refresh(paths: [String]) {
         let repoPaths = Array(Set(paths.filter(Self.isGitRepository)))
         refreshGeneration &+= 1
         let generation = refreshGeneration
 
         Task { @MainActor in
-            let dirty = await Self.dirtyRepositories(in: repoPaths)
-            let branches = await Self.branchNames(in: Array(dirty))
+            async let dirtyResult = Self.dirtyRepositories(in: repoPaths)
+            async let unpushedResult = Self.unpushedRepositories(in: repoPaths)
+            async let branchResult = Self.branchNames(in: repoPaths)
+            let dirty = await dirtyResult
+            let unpushed = await unpushedResult
+            let branches = await branchResult
             guard generation == refreshGeneration else { return }
             let nextDirtyPaths = dirtyPaths.subtracting(repoPaths).union(dirty)
+            let nextUnpushedPaths = unpushedPaths.subtracting(repoPaths).union(unpushed)
             var nextBranchNames = branchNames
             for path in repoPaths {
                 nextBranchNames[path] = branches[path]
             }
-            guard nextDirtyPaths != dirtyPaths || nextBranchNames != branchNames else { return }
+            guard nextDirtyPaths != dirtyPaths
+                || nextUnpushedPaths != unpushedPaths
+                || nextBranchNames != branchNames
+            else { return }
             dirtyPaths = nextDirtyPaths
+            unpushedPaths = nextUnpushedPaths
             branchNames = nextBranchNames
             onChange?()
         }
@@ -51,7 +67,11 @@ final class VSCodeGitRepoModel: ObservableObject {
         onChange?()
 
         Task { @MainActor in
-            let result = await Self.runCodexCommitAndPush(in: path)
+            // Nothing to commit means only a push is needed, which doesn't need Codex.
+            let needsCommit = await Self.hasUncommittedChanges(at: path)
+            let result = needsCommit
+                ? await Self.runCodexCommitAndPush(in: path)
+                : await Self.runGitPush(in: path)
             let isDirty = await Self.hasUncommittedChanges(at: path)
             let unpushedCount = await Self.unpushedCommitCount(at: path)
 
@@ -59,6 +79,11 @@ final class VSCodeGitRepoModel: ObservableObject {
                 dirtyPaths.insert(path)
             } else {
                 dirtyPaths.remove(path)
+            }
+            if unpushedCount > 0 {
+                unpushedPaths.insert(path)
+            } else {
+                unpushedPaths.remove(path)
             }
 
             if let failure = result.failureMessage {
@@ -79,6 +104,73 @@ final class VSCodeGitRepoModel: ObservableObject {
         }
     }
 
+    /// Runs the user's `run` zsh function from the project folder without
+    /// opening a terminal window.
+    func runProject(path: String) {
+        guard runStates[path] != .running else { return }
+        runStates[path] = .running
+        onChange?()
+
+        Task { @MainActor in
+            let result = await ProcessRunner.run(
+                executable: "/bin/zsh",
+                arguments: ["-ic", Self.runCommand(for: path)],
+                currentDirectory: path
+            )
+            Self.writeRunLog(path: path, result: result)
+
+            if result.status == 0 {
+                runStates[path] = .succeeded
+                onChange?()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if runStates[path] == .succeeded {
+                    runStates[path] = nil
+                }
+            } else {
+                let output = (result.stderr + "\n" + result.stdout)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let failure = VSCodeRepoCommitState.failed(
+                    "run failed (exit \(result.status)).\n\(String(output.suffix(600)))"
+                )
+                runStates[path] = failure
+                onChange?()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if runStates[path] == failure {
+                    runStates[path] = nil
+                }
+            }
+            onChange?()
+        }
+    }
+
+    /// Projects whose play button should install a Release build instead of a dev run.
+    private static let releaseProjectNames: Set<String> = ["noted-mac", "my-toolkit-mac"]
+
+    private static func runCommand(for path: String) -> String {
+        let name = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).lastPathComponent
+        return releaseProjectNames.contains(name) ? "release" : "run"
+    }
+
+    /// Keeps the last run's full output at ~/Library/Logs/Toolkit/vscode-run.log for debugging.
+    private static func writeRunLog(path: String, result: ProcessRunner.Result) {
+        let logDirectory = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Logs/Toolkit", isDirectory: true)
+        try? FileManager.default.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+        let text = """
+        [\(Date())] run in \(path)
+        exit: \(result.status)
+        --- stdout ---
+        \(result.stdout)
+        --- stderr ---
+        \(result.stderr)
+        """
+        try? text.write(
+            to: logDirectory.appendingPathComponent("vscode-run.log"),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
     // MARK: - Git
 
     private static func isGitRepository(_ path: String) -> Bool {
@@ -95,6 +187,19 @@ final class VSCodeGitRepoModel: ObservableObject {
                 dirty.insert(path)
             }
             return dirty
+        }
+    }
+
+    private static func unpushedRepositories(in paths: [String]) async -> Set<String> {
+        await withTaskGroup(of: (String, Bool).self) { group in
+            for path in paths {
+                group.addTask { (path, await unpushedCommitCount(at: path) > 0) }
+            }
+            var unpushed: Set<String> = []
+            for await (path, hasUnpushed) in group where hasUnpushed {
+                unpushed.insert(path)
+            }
+            return unpushed
         }
     }
 
@@ -200,6 +305,27 @@ final class VSCodeGitRepoModel: ObservableObject {
         let result = await ProcessRunner.run(executable: "/usr/bin/git", arguments: ["-C", path] + arguments)
         let output = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? "(none)" : output
+    }
+
+    private static func runGitPush(in path: String) async -> CodexResult {
+        let upstream = await ProcessRunner.run(
+            executable: "/usr/bin/git",
+            arguments: ["-C", path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+        )
+        let pushArguments = upstream.status == 0 ? ["push"] : ["push", "-u", "origin", "HEAD"]
+        let result = await ProcessRunner.run(
+            executable: "/usr/bin/git",
+            arguments: ["-C", path] + pushArguments
+        )
+        // git push reports progress on stderr even when it succeeds.
+        let output = (result.stdout + result.stderr).trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.status != 0 {
+            return CodexResult(
+                output: output,
+                failureMessage: "git push failed (exit \(result.status)).\n\(String(output.suffix(600)))"
+            )
+        }
+        return CodexResult(output: output, failureMessage: nil)
     }
 
     private static func runCodexCommitAndPush(in path: String) async -> CodexResult {

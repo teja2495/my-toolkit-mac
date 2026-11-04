@@ -154,7 +154,7 @@ private func vscodeAutoDirtyFolders(
     let pinnedPaths = Set(pinned.folders.map(\.path))
     return search.indexedFolders.filter { folder in
         !pinnedPaths.contains(folder.path)
-            && (gitRepos.isDirty(folder.path) || gitRepos.commitStates[folder.path] != nil)
+            && (gitRepos.hasPendingChanges(folder.path) || gitRepos.commitStates[folder.path] != nil)
     }
 }
 
@@ -315,6 +315,9 @@ final class DockWindowPopupController {
                 },
                 onCommitAndPush: { [weak self] path in
                     self?.vscodeGitRepos.commitAndPush(path: path)
+                },
+                onRunVSCodeFolder: { [weak self] path in
+                    self?.vscodeGitRepos.runProject(path: path)
                 },
                 onFocusSearchField: { [weak self] in
                     self?.makePanelKeyForSearch()
@@ -831,6 +834,7 @@ private struct DockWindowPopupView: View {
     let onPinVSCodeFolder: (String) -> Void
     let onUnpinVSCodeFolder: (VSCodeFolderShortcut) -> Void
     let onCommitAndPush: (String) -> Void
+    let onRunVSCodeFolder: (String) -> Void
     let onFocusSearchField: () -> Void
 
     var body: some View {
@@ -870,7 +874,9 @@ private struct DockWindowPopupView: View {
                             onClose: nil,
                             onPin: nil,
                             onUnpin: { onUnpinVSCodeFolder(shortcut) },
-                            gitAction: gitAction(for: shortcut.path)
+                            gitAction: gitAction(for: shortcut.path),
+                            runAction: runAction(for: shortcut.path),
+                            branchName: vscodeGitRepos.branchNames[shortcut.path]
                         )
                     }
 
@@ -892,7 +898,9 @@ private struct DockWindowPopupView: View {
                             onClose: nil,
                             onPin: { onPinVSCodeFolder(folder.path) },
                             onUnpin: nil,
-                            gitAction: gitAction(for: folder.path)
+                            gitAction: gitAction(for: folder.path),
+                            runAction: runAction(for: folder.path),
+                            branchName: vscodeGitRepos.branchNames[folder.path]
                         )
                     }
                 }
@@ -912,7 +920,9 @@ private struct DockWindowPopupView: View {
                         onUnpin: pinnedShortcut.map { shortcut in
                             { onUnpinVSCodeFolder(shortcut) }
                         },
-                        gitAction: gitAction(for: folder.path)
+                        gitAction: gitAction(for: folder.path),
+                        runAction: runAction(for: folder.path),
+                        branchName: vscodeGitRepos.branchNames[folder.path]
                     )
                 }
 
@@ -976,11 +986,17 @@ private struct DockWindowPopupView: View {
 
     private func gitAction(for path: String) -> WindowRowGitAction? {
         let state = vscodeGitRepos.commitStates[path]
-        guard state != nil || vscodeGitRepos.isDirty(path) else { return nil }
+        guard state != nil || vscodeGitRepos.hasPendingChanges(path) else { return nil }
         return WindowRowGitAction(
             state: state,
-            branchName: vscodeGitRepos.branchNames[path],
             onCommitAndPush: { onCommitAndPush(path) }
+        )
+    }
+
+    private func runAction(for path: String) -> WindowRowRunAction {
+        WindowRowRunAction(
+            state: vscodeGitRepos.runStates[path],
+            onRun: { onRunVSCodeFolder(path) }
         )
     }
 
@@ -1418,6 +1434,8 @@ private struct WindowRow: View {
     let onPin: (() -> Void)?
     let onUnpin: (() -> Void)?
     var gitAction: WindowRowGitAction? = nil
+    var runAction: WindowRowRunAction? = nil
+    var branchName: String? = nil
 
     private var hasContextActions: Bool {
         onPin != nil || onUnpin != nil
@@ -1437,7 +1455,7 @@ private struct WindowRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(.primary)
-                if let branchName = gitAction?.branchName {
+                if let branchName {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.triangle.branch")
                             .font(.system(size: 9, weight: .semibold))
@@ -1458,6 +1476,9 @@ private struct WindowRow: View {
             Spacer(minLength: 4)
             if let gitAction {
                 GitCommitPushButton(action: gitAction)
+            }
+            if let runAction {
+                RunProjectButton(action: runAction)
             }
             if let onClose {
                 Button(action: onClose) {
@@ -1506,13 +1527,62 @@ private struct WindowRow: View {
 
 private struct WindowRowGitAction {
     let state: VSCodeRepoCommitState?
-    let branchName: String?
     let onCommitAndPush: () -> Void
+}
+
+private struct WindowRowRunAction {
+    let state: VSCodeRepoCommitState?
+    let onRun: () -> Void
+}
+
+private struct RunProjectButton: View {
+    let action: WindowRowRunAction
+
+    var body: some View {
+        Button(action: action.onRun) {
+            ZStack {
+                switch action.state {
+                case .running:
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                case .succeeded:
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(Color.green)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                case nil:
+                    Image(systemName: "play.fill")
+                        .foregroundStyle(.white)
+                }
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(action.state == .running)
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        switch action.state {
+        case .running:
+            return "Running…"
+        case .succeeded:
+            return "Run finished"
+        case .failed(let message):
+            return "Run failed — click to retry.\n\(message)"
+        case nil:
+            return "Run project"
+        }
+    }
 }
 
 private struct GitCommitPushButton: View {
     let action: WindowRowGitAction
-    private let size = CGSize(width: 34, height: 24)
+    private let size = CGSize(width: 24, height: 24)
 
     var body: some View {
         Button(action: action.onCommitAndPush) {
@@ -1535,10 +1605,7 @@ private struct GitCommitPushButton: View {
             }
             .font(.system(size: 12, weight: .semibold))
             .frame(width: size.width, height: size.height)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.16))
-            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(action.state == .running || action.state == .succeeded)
