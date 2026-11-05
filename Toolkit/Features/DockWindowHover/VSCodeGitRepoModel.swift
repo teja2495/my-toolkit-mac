@@ -17,6 +17,8 @@ final class VSCodeGitRepoModel: ObservableObject {
     @Published private(set) var commitStates: [String: VSCodeRepoCommitState] = [:]
     @Published private(set) var branchNames: [String: String] = [:]
     @Published private(set) var runStates: [String: VSCodeRepoCommitState] = [:]
+    /// Project folders that `project_cmd` in ~/.zshrc knows how to run/release.
+    @Published private(set) var runnablePaths: Set<String> = []
 
     var onChange: (() -> Void)?
 
@@ -31,7 +33,17 @@ final class VSCodeGitRepoModel: ObservableObject {
         dirtyPaths.contains(path) || unpushedPaths.contains(path)
     }
 
+    func canRun(_ path: String) -> Bool {
+        runnablePaths.contains(Self.standardized(path))
+    }
+
     func refresh(paths: [String]) {
+        let nextRunnablePaths = Self.loadRunnablePaths()
+        if nextRunnablePaths != runnablePaths {
+            runnablePaths = nextRunnablePaths
+            onChange?()
+        }
+
         let repoPaths = Array(Set(paths.filter(Self.isGitRepository)))
         refreshGeneration &+= 1
         let generation = refreshGeneration
@@ -149,6 +161,39 @@ final class VSCodeGitRepoModel: ObservableObject {
     private static func runCommand(for path: String) -> String {
         let name = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).lastPathComponent
         return releaseProjectNames.contains(name) ? "release" : "run"
+    }
+
+    /// Reads the folder paths handled by the `project_cmd` case statement in
+    /// ~/.zshrc, so the play button only shows for projects `run`/`release` support.
+    private static func loadRunnablePaths() -> Set<String> {
+        let zshrcPath = (NSHomeDirectory() as NSString).appendingPathComponent(".zshrc")
+        guard let contents = try? String(contentsOfFile: zshrcPath, encoding: .utf8) else { return [] }
+
+        var paths: Set<String> = []
+        var isInProjectCommand = false
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("project_cmd()") {
+                isInProjectCommand = true
+                continue
+            }
+            guard isInProjectCommand else { continue }
+            if line == "}" { break }
+            guard line.hasSuffix(")"), !line.hasPrefix("*"), !line.hasPrefix("#") else { continue }
+            let pattern = String(line.dropLast())
+            for alternative in pattern.components(separatedBy: "|") {
+                let candidate = alternative
+                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                guard candidate.hasPrefix("/") || candidate.hasPrefix("~") else { continue }
+                paths.insert(standardized(candidate))
+            }
+        }
+        return paths
+    }
+
+    private static func standardized(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.path
     }
 
     /// Keeps the last run's full output at ~/Library/Logs/Toolkit/vscode-run.log for debugging.

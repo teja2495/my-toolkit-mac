@@ -1003,8 +1003,9 @@ private struct DockWindowPopupView: View {
         )
     }
 
-    private func runAction(for path: String) -> WindowRowRunAction {
-        WindowRowRunAction(
+    private func runAction(for path: String) -> WindowRowRunAction? {
+        guard vscodeGitRepos.canRun(path) else { return nil }
+        return WindowRowRunAction(
             state: vscodeGitRepos.runStates[path],
             onRun: { onRunVSCodeFolder(path) }
         )
