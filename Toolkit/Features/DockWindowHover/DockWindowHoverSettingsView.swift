@@ -75,7 +75,7 @@ struct DockWindowHoverSettingsView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("For VS Code, search folders in the popup and right-click a result to pin it. Right-click a pinned folder to unpin.")
+                        Text("For VS Code and Zed, search folders in the popup and right-click a result to pin it. Right-click a pinned folder to unpin.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

@@ -91,8 +91,8 @@ final class DockHoverDetector {
 
         guard let dockItemFrame = frame(of: element) else { return nil }
 
-        // VS Code's Dock item remains available after the app quits. Keep it
-        // eligible so its configured folder shortcuts can also launch VS Code.
+        // VS Code's (or Zed's) Dock item remains available after the app quits. Keep it
+        // eligible so its configured folder shortcuts can also launch the editor.
         guard let runningApplication else {
             guard isVSCodeBundle(bundleIdentifierFromURL), let bundleIdentifierFromURL else {
                 return nil
@@ -101,7 +101,7 @@ final class DockHoverDetector {
                 processIdentifier: 0,
                 bundleIdentifier: bundleIdentifierFromURL,
                 bundleURL: urlAttribute("AXURL", from: element),
-                displayName: title ?? "Visual Studio Code",
+                displayName: title ?? "Editor",
                 dockItemFrame: dockItemFrame
             )
         }
@@ -116,8 +116,7 @@ final class DockHoverDetector {
     }
 
     private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
-        bundleIdentifier == "com.microsoft.VSCode"
-            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
+        ProjectEditorBundle.contains(bundleIdentifier)
     }
 
     private func frame(of element: AXUIElement) -> CGRect? {

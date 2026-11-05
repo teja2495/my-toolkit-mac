@@ -795,9 +795,7 @@ final class DockWindowPopupController {
     }
 
     private func isVSCodeBundle(_ bundleIdentifier: String?) -> Bool {
-        guard let bundleIdentifier else { return false }
-        return bundleIdentifier == "com.microsoft.VSCode"
-            || bundleIdentifier == "com.microsoft.VSCodeInsiders"
+        ProjectEditorBundle.contains(bundleIdentifier)
     }
 
     private func isChromeBundle(_ bundleIdentifier: String?) -> Bool {
