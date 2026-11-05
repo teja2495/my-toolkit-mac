@@ -132,6 +132,18 @@ private final class VSCodeFolderSearchModel: ObservableObject {
             }
         }
 
+        let pinnedFiles = ["/Users/teja2495/.zshrc"]
+        for path in pinnedFiles where fileManager.fileExists(atPath: path) {
+            folders.append(
+                VSCodeSearchFolder(
+                    id: path,
+                    path: path,
+                    name: (path as NSString).lastPathComponent,
+                    subtitle: "~"
+                )
+            )
+        }
+
         return folders.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
@@ -624,7 +636,7 @@ final class DockWindowPopupController {
         guard !path.isEmpty else { return }
 
         hide()
-        let folderURL = URL(fileURLWithPath: path, isDirectory: true)
+        let folderURL = URL(fileURLWithPath: path)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
 
