@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import ApplicationServices
+import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor
@@ -13,6 +14,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private let onCopy: (ClipboardHistoryItem) -> Void
     private var hostingController: NSHostingController<ClipboardHistoryView>?
     private var previousApp: NSRunningApplication?
+    private var keyMonitor: Any?
     private let viewModel = ClipboardHistoryViewModel()
 
     init(store: ClipboardHistoryStore, onCopy: @escaping (ClipboardHistoryItem) -> Void) {
@@ -71,16 +73,45 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
         // Focus the most recent copy, even when pinned items are listed above it.
         viewModel.selectedID = store.items.first(where: { !$0.isPinned })?.id ?? store.items.first?.id
-        viewModel.focusToken = UUID()
 
         panel.setFrame(centeredFrame(), display: true)
         NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
+        installKeyMonitor()
     }
 
     func close() {
+        removeKeyMonitor()
         panel.orderOut(nil)
+    }
+
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.panel, let key = Self.key(for: event) else { return event }
+            return self.viewModel.keyHandler?(key) == true ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    private static func key(for event: NSEvent) -> ClipboardHistoryViewModel.Key? {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        switch Int(event.keyCode) {
+        case kVK_UpArrow where modifiers.isEmpty: return .up
+        case kVK_DownArrow where modifiers.isEmpty: return .down
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            if modifiers == .command { return .paste }
+            return modifiers.isEmpty ? .copy : nil
+        case kVK_Delete, kVK_ForwardDelete:
+            return modifiers.isEmpty ? .delete : nil
+        case kVK_Escape: return .close
+        default: return nil
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -88,6 +119,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        removeKeyMonitor()
         previousApp = nil
     }
 
@@ -140,6 +172,11 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
 @MainActor
 final class ClipboardHistoryViewModel: ObservableObject {
+    enum Key {
+        case up, down, copy, paste, delete, close
+    }
+
     @Published var selectedID: ClipboardHistoryItem.ID?
-    @Published var focusToken = UUID()
+    /// Set by the view; returns true when the key was handled.
+    var keyHandler: ((Key) -> Bool)?
 }

@@ -8,8 +8,6 @@ struct ClipboardHistoryView: View {
     let onPaste: (ClipboardHistoryItem) -> Void
     let onClose: () -> Void
 
-    @FocusState private var listFocused: Bool
-
     private static let darkBackground = Color(red: 0.118, green: 0.118, blue: 0.125)
     private static let accent = Color(red: 0.93, green: 0.62, blue: 0.27)
 
@@ -39,8 +37,9 @@ struct ClipboardHistoryView: View {
         .background(Self.darkBackground.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .frame(minWidth: 600, minHeight: 360)
-        .onAppear { listFocused = true }
-        .onChange(of: model.focusToken) { listFocused = true }
+        .onAppear {
+            model.keyHandler = { key in handleKey(key) }
+        }
         .onChange(of: store.items) {
             if selectedItem == nil {
                 model.selectedID = recentItems.first?.id ?? pinnedItems.first?.id
@@ -52,7 +51,7 @@ struct ClipboardHistoryView: View {
 
     private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Clipboard")
+            Text("Clipboard History")
                 .font(.system(size: 22, weight: .semibold, design: .serif))
                 .padding(.horizontal, 20)
                 .padding(.top, 26)
@@ -85,12 +84,6 @@ struct ClipboardHistoryView: View {
             }
         }
         .background(Color.black.opacity(0.12))
-        .focusable()
-        .focusEffectDisabled()
-        .focused($listFocused)
-        .onKeyPress(keys: [.upArrow, .downArrow, .return, .delete, .deleteForward, .escape]) { press in
-            handleKey(press)
-        }
     }
 
     private func sectionHeader(_ title: String, systemImage: String) -> some View {
@@ -119,7 +112,6 @@ struct ClipboardHistoryView: View {
         .onTapGesture(count: 2) { onCopy(item) }
         .onTapGesture {
             model.selectedID = item.id
-            listFocused = true
         }
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin") {
@@ -128,28 +120,23 @@ struct ClipboardHistoryView: View {
         }
     }
 
-    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
-        switch press.key {
-        case .upArrow:
+    /// Keys arrive from the panel's event monitor so they work regardless of which view has focus.
+    private func handleKey(_ key: ClipboardHistoryViewModel.Key) -> Bool {
+        switch key {
+        case .up:
             moveSelection(by: -1)
-        case .downArrow:
+        case .down:
             moveSelection(by: 1)
-        case .return:
-            guard let selectedItem else { return .ignored }
-            if press.modifiers.contains(.command) {
-                onPaste(selectedItem)
-            } else {
-                onCopy(selectedItem)
-            }
-        case .delete, .deleteForward:
-            guard let id = model.selectedID else { return .ignored }
+        case .copy, .paste:
+            guard let selectedItem else { return false }
+            key == .paste ? onPaste(selectedItem) : onCopy(selectedItem)
+        case .delete:
+            guard let id = model.selectedID else { return false }
             delete(id: id)
-        case .escape:
+        case .close:
             onClose()
-        default:
-            return .ignored
         }
-        return .handled
+        return true
     }
 
     private func moveSelection(by offset: Int) {
@@ -288,6 +275,8 @@ private struct ClipboardHistoryRow: View {
         HStack(alignment: .center, spacing: 10) {
             if item.kind == .image {
                 ClipboardThumbnail(item: item, store: store, size: CGSize(width: 48, height: 40))
+            } else {
+                ClipboardTextIcon(text: item.text ?? "", isSelected: isSelected)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -298,9 +287,10 @@ private struct ClipboardHistoryRow: View {
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(item.copiedAt.formatted(.relative(presentation: .named)))
+                Text(subtitle)
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
 
             Button(action: onDelete) {
@@ -323,6 +313,12 @@ private struct ClipboardHistoryRow: View {
         .onHover { isHovered = $0 }
     }
 
+    private var subtitle: String {
+        let time = item.copiedAt.formatted(.relative(presentation: .named))
+        guard let app = item.sourceAppName, !app.isEmpty else { return time }
+        return "\(time) · \(app)"
+    }
+
     private var title: String {
         switch item.kind {
         case .text:
@@ -331,6 +327,44 @@ private struct ClipboardHistoryRow: View {
             guard let width = item.imageWidth, let height = item.imageHeight else { return "Image" }
             return "Image  \(width) × \(height)"
         }
+    }
+}
+
+/// Leading tile for text rows, sized to match image thumbnails so rows line up.
+private struct ClipboardTextIcon: View {
+    let text: String
+    let isSelected: Bool
+
+    private static let accent = Color(red: 0.93, green: 0.62, blue: 0.27)
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(Self.accent.opacity(isSelected ? 0.2 : 0.12))
+            .overlay(
+                Image(systemName: symbolName)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Self.accent)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .frame(width: 48, height: 40)
+    }
+
+    private var symbolName: String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), let scheme = url.scheme, ["http", "https"].contains(scheme.lowercased()),
+           !trimmed.contains(where: \.isWhitespace) {
+            return "link"
+        }
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
+            return "folder"
+        }
+        if (trimmed.contains("{") && trimmed.contains("}")) || trimmed.contains("=>") || trimmed.contains("();") {
+            return "chevron.left.forwardslash.chevron.right"
+        }
+        return "text.alignleft"
     }
 }
 

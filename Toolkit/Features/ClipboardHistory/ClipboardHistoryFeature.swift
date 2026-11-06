@@ -77,7 +77,9 @@ final class ClipboardHistoryFeature: AppFeature {
         // Skip file copies from Finder; they only carry a file icon image and a path.
         guard !types.contains(.fileURL) else { return }
 
-        let sourceAppName = NSWorkspace.shared.frontmostApplication?.localizedName
+        let sourceApp = NSWorkspace.shared.frontmostApplication
+        guard !Self.isExcluded(sourceApp) else { return }
+        let sourceAppName = sourceApp?.localizedName
 
         if let text = pasteboard.string(forType: .string) {
             store.addText(text, sourceAppName: sourceAppName)
@@ -88,6 +90,14 @@ final class ClipboardHistoryFeature: AppFeature {
            let (pngData, pixelSize) = Self.pngData(from: image) {
             store.addImage(pngData: pngData, size: pixelSize, sourceAppName: sourceAppName)
         }
+    }
+
+    /// Apps whose copies are never saved (password managers).
+    private static func isExcluded(_ app: NSRunningApplication?) -> Bool {
+        guard let app else { return false }
+        let bundleID = app.bundleIdentifier?.lowercased() ?? ""
+        let name = app.localizedName?.lowercased() ?? ""
+        return bundleID.contains("enpass") || name.contains("enpass")
     }
 
     private func writeToPasteboard(_ item: ClipboardHistoryItem) {
