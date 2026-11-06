@@ -219,7 +219,7 @@ final class DockWindowHoverFeature: AppFeature {
         ) as? [[String: Any]] else { return false }
 
         let screenshotOwners: Set<String> = ["screencaptureui", "screencapture", "Screenshot"]
-        let minimumOverlayArea = NSScreen.screens
+        let minimumOverlayArea: CGFloat = NSScreen.screens
             .map { $0.frame.width * $0.frame.height }
             .min()
             .map { $0 * 0.5 } ?? 0

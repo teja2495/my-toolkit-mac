@@ -38,6 +38,10 @@ struct SettingsDetail: View {
             TextExpanderSettingsView(bootstrapper: bootstrapper)
         case "openlogi":
             OpenLogiSettingsView(bootstrapper: bootstrapper)
+        case "clipboard-history":
+            ClipboardHistorySettingsView(bootstrapper: bootstrapper)
+        case "window-shortcuts":
+            WindowShortcutsSettingsView(bootstrapper: bootstrapper)
         case "miscellaneous":
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
         default:

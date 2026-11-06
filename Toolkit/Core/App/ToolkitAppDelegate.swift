@@ -32,6 +32,13 @@ final class ToolkitAppDelegate: NSObject, NSApplicationDelegate {
         sender.reply(toOpenOrPrint: .success)
     }
 
+    /// Set once AppKit has finished launching, so late subscribers know not to wait for the notification.
+    private(set) static var hasFinishedLaunching = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.hasFinishedLaunching = true
+    }
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSAppleEventManager.shared().setEventHandler(
             self,

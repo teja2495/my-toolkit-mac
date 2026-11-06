@@ -79,6 +79,20 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
+            id: "clipboard-history",
+            title: "Clipboard History",
+            summary: "Saves every text and image you copy and shows them in a two-pane history window (⌥V).",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
+            id: "window-shortcuts",
+            title: "Keyboard Shortcuts",
+            summary: "Option+Left/Right snaps the focused window to the left/right half; Option+Up maximizes, Option+Down minimizes.",
+            requiresAccessibilityAccess: true,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "openlogi",
             title: "OpenLogi",
             summary: "Customize the front, back, middle, and scroll wheel buttons on your mouse.",
@@ -250,6 +264,36 @@ final class AppBootstrapper: ObservableObject {
         accessibilityPermissionManager.refreshStatus()
         updateFeatureLifecycle()
         startPermissionWatchdog()
+        promptForAccessibilityOnLaunchIfNeeded()
+    }
+
+    /// Asks for Accessibility as soon as the app has launched. The system prompt is dropped if it's
+    /// requested before AppKit finishes launching, so wait for that first, then use the same
+    /// reset + prompt flow as the "Grant" button (a stale entry from a previous build blocks the prompt).
+    private func promptForAccessibilityOnLaunchIfNeeded() {
+        guard !accessibilityPermissionManager.isTrusted else { return }
+
+        let request: () -> Void = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                guard let self, !self.accessibilityPermissionManager.isTrusted else { return }
+                self.requestAccessibilityAccess()
+            }
+        }
+
+        if ToolkitAppDelegate.hasFinishedLaunching {
+            request()
+            return
+        }
+
+        var observer: NSObjectProtocol?
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            request()
+        }
     }
 
     func requestAccessibilityAccess() {
@@ -285,6 +329,10 @@ final class AppBootstrapper: ObservableObject {
 
     func setDockWindowHoverSuspended(_ isSuspended: Bool) {
         (liveFeatures["dock-window-hover"] as? DockWindowHoverFeature)?.isSuspended = isSuspended
+    }
+
+    func showClipboardHistory() {
+        (liveFeatures["clipboard-history"] as? ClipboardHistoryFeature)?.showPanel()
     }
 
     func phoneIntegrationController() -> PhoneBridgeController {
@@ -326,6 +374,7 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(mediaControlsFeature)
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
+        ensureFeatureExists(ClipboardHistoryFeature())
 
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()
@@ -338,6 +387,7 @@ final class AppBootstrapper: ObservableObject {
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())
             ensureFeatureExists(OpenLogiFeature())
+            ensureFeatureExists(WindowShortcutsFeature())
         } else {
             if let feature = liveFeatures.removeValue(forKey: "dock-window-hover") {
                 feature.stop()
@@ -350,6 +400,9 @@ final class AppBootstrapper: ObservableObject {
             }
             if let openLogiFeature = liveFeatures.removeValue(forKey: "openlogi") {
                 openLogiFeature.stop()
+            }
+            if let windowShortcutsFeature = liveFeatures.removeValue(forKey: "window-shortcuts") {
+                windowShortcutsFeature.stop()
             }
         }
 
