@@ -11,13 +11,13 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     private let panel: NSPanel
     private let store: ClipboardHistoryStore
-    private let onCopy: (ClipboardHistoryItem) -> Void
+    private let onCopy: ([ClipboardHistoryItem]) -> Void
     private var hostingController: NSHostingController<ClipboardHistoryView>?
     private var previousApp: NSRunningApplication?
     private var keyMonitor: Any?
     private let viewModel = ClipboardHistoryViewModel()
 
-    init(store: ClipboardHistoryStore, onCopy: @escaping (ClipboardHistoryItem) -> Void) {
+    init(store: ClipboardHistoryStore, onCopy: @escaping ([ClipboardHistoryItem]) -> Void) {
         self.store = store
         self.onCopy = onCopy
         panel = NSPanel(
@@ -60,8 +60,8 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             let view = ClipboardHistoryView(
                 store: store,
                 model: viewModel,
-                onCopy: { [weak self] item in self?.copyOnly(item) },
-                onPaste: { [weak self] item in self?.paste(item) },
+                onCopy: { [weak self] items in self?.copyOnly(items) },
+                onPaste: { [weak self] items in self?.paste(items) },
                 onClose: { [weak self] in self?.close() }
             )
             let controller = NSHostingController(rootView: view)
@@ -73,6 +73,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
         // Focus the most recent copy, even when pinned items are listed above it.
         viewModel.selectedID = store.items.first(where: { !$0.isPinned })?.id ?? store.items.first?.id
+        viewModel.multiSelectedIDs = []
 
         panel.setFrame(centeredFrame(), display: true)
         NSApp.activate(ignoringOtherApps: true)
@@ -109,7 +110,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
             return modifiers.isEmpty ? .copy : nil
         case kVK_Delete, kVK_ForwardDelete:
             return modifiers.isEmpty ? .delete : nil
-        case kVK_Escape: return .close
+        case kVK_Escape: return .clearSelection
         default: return nil
         }
     }
@@ -123,15 +124,15 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         previousApp = nil
     }
 
-    private func copyOnly(_ item: ClipboardHistoryItem) {
-        onCopy(item)
+    private func copyOnly(_ items: [ClipboardHistoryItem]) {
+        onCopy(items)
         close()
         previousApp?.activate()
     }
 
     /// Copies the item and pastes it into the app that was frontmost before the panel opened.
-    private func paste(_ item: ClipboardHistoryItem) {
-        onCopy(item)
+    private func paste(_ items: [ClipboardHistoryItem]) {
+        onCopy(items)
         close()
         guard let previousApp else { return }
         previousApp.activate()
@@ -173,10 +174,12 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 @MainActor
 final class ClipboardHistoryViewModel: ObservableObject {
     enum Key {
-        case up, down, copy, paste, delete, close
+        case up, down, copy, paste, delete, clearSelection, close
     }
 
     @Published var selectedID: ClipboardHistoryItem.ID?
+    /// Items picked with ⌘-click, in the order they were picked.
+    @Published var multiSelectedIDs: [ClipboardHistoryItem.ID] = []
     /// Set by the view; returns true when the key was handled.
     var keyHandler: ((Key) -> Bool)?
 }

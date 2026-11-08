@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 
 /// Hard-coded global shortcuts that snap the focused window of the frontmost app.
 /// ⌥← left half, ⌥→ right half, ⌥↑ maximize, ⌥↓ minimize.
+/// Also ⌘⎋ to put the computer to sleep.
 @MainActor
 final class WindowShortcutsFeature: AppFeature {
     let id = "window-shortcuts"
@@ -59,6 +60,9 @@ final class WindowShortcutsFeature: AppFeature {
         }
     }
 
+    static let sleepShortcutSymbol = "⌘ ⎋"
+    static let sleepShortcutTitle = "Sleep computer"
+
     private var hotKeys: [HotKey] = []
 
     func start() {
@@ -75,11 +79,30 @@ final class WindowShortcutsFeature: AppFeature {
                 onKeyUp: {}
             )
         }
+        if let sleepHotKey = HotKey(
+            carbonKeyCode: kVK_Escape,
+            carbonModifiers: cmdKey,
+            onKeyDown: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.sleepComputer()
+                }
+            },
+            onKeyUp: {}
+        ) {
+            hotKeys.append(sleepHotKey)
+        }
     }
 
     func stop() {
         // HotKey unregisters itself on deinit.
         hotKeys.removeAll()
+    }
+
+    private func sleepComputer() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["sleepnow"]
+        try? process.run()
     }
 
     private func moveFocusedWindow(to placement: Placement) {

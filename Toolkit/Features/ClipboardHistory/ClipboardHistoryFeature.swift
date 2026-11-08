@@ -7,8 +7,8 @@ final class ClipboardHistoryFeature: AppFeature {
     let id = "clipboard-history"
 
     let store = ClipboardHistoryStore()
-    private lazy var panelController = ClipboardHistoryPanelController(store: store) { [weak self] item in
-        self?.writeToPasteboard(item)
+    private lazy var panelController = ClipboardHistoryPanelController(store: store) { [weak self] items in
+        self?.writeToPasteboard(items)
     }
 
     private var pollTimer: Timer?
@@ -98,6 +98,19 @@ final class ClipboardHistoryFeature: AppFeature {
         let bundleID = app.bundleIdentifier?.lowercased() ?? ""
         let name = app.localizedName?.lowercased() ?? ""
         return bundleID.contains("enpass") || name.contains("enpass")
+    }
+
+    /// Multiple items are joined as text separated by a blank line; images are skipped in that case.
+    private func writeToPasteboard(_ items: [ClipboardHistoryItem]) {
+        let textItems = items.filter { $0.kind == .text }
+        guard items.count > 1, !textItems.isEmpty else {
+            if let item = items.first { writeToPasteboard(item) }
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(textItems.map { $0.text ?? "" }.joined(separator: "\n\n"), forType: .string)
+        lastChangeCount = pasteboard.changeCount
     }
 
     private func writeToPasteboard(_ item: ClipboardHistoryItem) {

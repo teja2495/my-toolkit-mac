@@ -4,8 +4,8 @@ import SwiftUI
 struct ClipboardHistoryView: View {
     @ObservedObject var store: ClipboardHistoryStore
     @ObservedObject var model: ClipboardHistoryViewModel
-    let onCopy: (ClipboardHistoryItem) -> Void
-    let onPaste: (ClipboardHistoryItem) -> Void
+    let onCopy: ([ClipboardHistoryItem]) -> Void
+    let onPaste: ([ClipboardHistoryItem]) -> Void
     let onClose: () -> Void
 
     private static let darkBackground = Color(red: 0.118, green: 0.118, blue: 0.125)
@@ -21,6 +21,13 @@ struct ClipboardHistoryView: View {
 
     /// Items in on-screen order: pinned section first, then recent.
     private var displayItems: [ClipboardHistoryItem] { pinnedItems + recentItems }
+
+    /// ⌘-clicked items in pick order, or just the focused item when nothing is multi-selected.
+    private var itemsToCopy: [ClipboardHistoryItem] {
+        let multi = model.multiSelectedIDs.compactMap { id in store.items.first { $0.id == id } }
+        if !multi.isEmpty { return multi }
+        return selectedItem.map { [$0] } ?? []
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -41,6 +48,8 @@ struct ClipboardHistoryView: View {
             model.keyHandler = { key in handleKey(key) }
         }
         .onChange(of: store.items) {
+            let ids = Set(store.items.map(\.id))
+            model.multiSelectedIDs.removeAll { !ids.contains($0) }
             if selectedItem == nil {
                 model.selectedID = recentItems.first?.id ?? pinnedItems.first?.id
             }
@@ -51,8 +60,17 @@ struct ClipboardHistoryView: View {
 
     private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Clipboard History")
-                .font(.system(size: 22, weight: .semibold, design: .serif))
+            HStack(alignment: .firstTextBaseline) {
+                Text("Clipboard History")
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                Spacer()
+                if model.multiSelectedIDs.count > 1 {
+                    Text("\(model.multiSelectedIDs.count) selected")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Self.accent)
+                        .help("Press Return to copy them, separated by a blank line")
+                }
+            }
                 .padding(.horizontal, 20)
                 .padding(.top, 26)
                 .padding(.bottom, 12)
@@ -104,14 +122,19 @@ struct ClipboardHistoryView: View {
         ClipboardHistoryRow(
             item: item,
             store: store,
-            isSelected: item.id == model.selectedID,
+            isSelected: item.id == model.selectedID || model.multiSelectedIDs.contains(item.id),
             onDelete: { delete(id: item.id) }
         )
         .id(item.id)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { onCopy(item) }
+        .onTapGesture(count: 2) { onCopy([item]) }
         .onTapGesture {
-            model.selectedID = item.id
+            if NSEvent.modifierFlags.contains(.command) {
+                toggleMultiSelection(item)
+            } else {
+                model.multiSelectedIDs = []
+                model.selectedID = item.id
+            }
         }
         .contextMenu {
             Button(item.isPinned ? "Unpin" : "Pin") {
@@ -128,15 +151,36 @@ struct ClipboardHistoryView: View {
         case .down:
             moveSelection(by: 1)
         case .copy, .paste:
-            guard let selectedItem else { return false }
-            key == .paste ? onPaste(selectedItem) : onCopy(selectedItem)
+            let items = itemsToCopy
+            guard !items.isEmpty else { return false }
+            key == .paste ? onPaste(items) : onCopy(items)
         case .delete:
             guard let id = model.selectedID else { return false }
             delete(id: id)
+        case .clearSelection:
+            guard !model.multiSelectedIDs.isEmpty else { onClose(); return true }
+            model.multiSelectedIDs = []
         case .close:
             onClose()
         }
         return true
+    }
+
+    /// The first ⌘-click also picks up the already-focused item, like Finder.
+    /// Only text items can be multi-selected, since images can't be joined.
+    private func toggleMultiSelection(_ item: ClipboardHistoryItem) {
+        guard item.kind == .text else { return }
+        let id = item.id
+        if model.multiSelectedIDs.isEmpty, let current = selectedItem, current.id != id, current.kind == .text {
+            model.multiSelectedIDs = [current.id]
+        }
+        if let index = model.multiSelectedIDs.firstIndex(of: id) {
+            model.multiSelectedIDs.remove(at: index)
+            if model.selectedID == id { model.selectedID = model.multiSelectedIDs.last ?? id }
+        } else {
+            model.multiSelectedIDs.append(id)
+            model.selectedID = id
+        }
     }
 
     private func moveSelection(by offset: Int) {
@@ -171,6 +215,7 @@ struct ClipboardHistoryView: View {
             let nextIndex = index + 1 < items.count ? index + 1 : index - 1
             model.selectedID = nextIndex >= 0 ? items[nextIndex].id : nil
         }
+        model.multiSelectedIDs.removeAll { $0 == id }
         store.delete(id: id)
     }
 
@@ -234,7 +279,7 @@ struct ClipboardHistoryView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button {
-                onCopy(item)
+                onCopy([item])
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
                     .font(.system(size: 11, weight: .medium))
