@@ -15,7 +15,7 @@ struct WindowShortcutsSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "Keyboard Shortcuts",
-            subtitle: "Global shortcuts that snap the focused window of any app or put the computer to sleep."
+            subtitle: "Global shortcuts that snap the focused window of any app restart, quit or force quit the focused app, or put the computer to sleep."
         ) {
             if let feature {
                 FeatureEnableToggle(isOn: feature.isEnabled, disabled: !permissionGranted) {
@@ -43,8 +43,22 @@ struct WindowShortcutsSettingsView: View {
                 }
 
                 SettingsCard {
-                    SettingsRow(WindowShortcutsFeature.sleepShortcutTitle) {
-                        ShortcutBadge(symbol: WindowShortcutsFeature.sleepShortcutSymbol)
+                    VStack(alignment: .leading, spacing: 0) {
+                        SettingsRow(WindowShortcutsFeature.restartAppShortcutTitle) {
+                            ShortcutBadge(symbol: WindowShortcutsFeature.restartAppShortcutSymbol)
+                        }
+                        SettingsCardDivider()
+                        SettingsRow(WindowShortcutsFeature.quitAppShortcutTitle) {
+                            ShortcutBadge(symbol: WindowShortcutsFeature.quitAppShortcutSymbol)
+                        }
+                        SettingsCardDivider()
+                        SettingsRow(WindowShortcutsFeature.forceQuitAppShortcutTitle) {
+                            ShortcutBadge(symbol: WindowShortcutsFeature.forceQuitAppShortcutSymbol)
+                        }
+                        SettingsCardDivider()
+                        SettingsRow(WindowShortcutsFeature.sleepShortcutTitle) {
+                            ShortcutBadge(symbol: WindowShortcutsFeature.sleepShortcutSymbol)
+                        }
                     }
                 }
             }

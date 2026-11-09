@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 
 /// Hard-coded global shortcuts that snap the focused window of the frontmost app.
 /// ⌥← left half, ⌥→ right half, ⌥↑ maximize, ⌥↓ minimize.
-/// Also ⌘⎋ to put the computer to sleep.
+/// Also ⌘⎋ to put the computer to sleep, ⌥R to restart, ⌥Q to quit and ⌥⇧Q to force quit the frontmost app.
 @MainActor
 final class WindowShortcutsFeature: AppFeature {
     let id = "window-shortcuts"
@@ -62,6 +62,12 @@ final class WindowShortcutsFeature: AppFeature {
 
     static let sleepShortcutSymbol = "⌘ ⎋"
     static let sleepShortcutTitle = "Sleep computer"
+    static let restartAppShortcutSymbol = "⌥ R"
+    static let restartAppShortcutTitle = "Restart focused app"
+    static let quitAppShortcutSymbol = "⌥ Q"
+    static let quitAppShortcutTitle = "Quit focused app"
+    static let forceQuitAppShortcutSymbol = "⌥ ⇧ Q"
+    static let forceQuitAppShortcutTitle = "Force quit focused app"
 
     private var hotKeys: [HotKey] = []
 
@@ -91,11 +97,97 @@ final class WindowShortcutsFeature: AppFeature {
         ) {
             hotKeys.append(sleepHotKey)
         }
+        if let restartHotKey = HotKey(
+            carbonKeyCode: kVK_ANSI_R,
+            carbonModifiers: optionKey,
+            onKeyDown: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.restartFrontmostApp()
+                }
+            },
+            onKeyUp: {}
+        ) {
+            hotKeys.append(restartHotKey)
+        }
+        if let quitHotKey = HotKey(
+            carbonKeyCode: kVK_ANSI_Q,
+            carbonModifiers: optionKey,
+            onKeyDown: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.quitFrontmostApp(force: false)
+                }
+            },
+            onKeyUp: {}
+        ) {
+            hotKeys.append(quitHotKey)
+        }
+        if let forceQuitHotKey = HotKey(
+            carbonKeyCode: kVK_ANSI_Q,
+            carbonModifiers: optionKey | shiftKey,
+            onKeyDown: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.quitFrontmostApp(force: true)
+                }
+            },
+            onKeyUp: {}
+        ) {
+            hotKeys.append(forceQuitHotKey)
+        }
     }
 
     func stop() {
         // HotKey unregisters itself on deinit.
         hotKeys.removeAll()
+        restartTask?.cancel()
+        restartTask = nil
+    }
+
+    private var restartTask: Task<Void, Never>?
+
+    /// The frontmost app, excluding Toolkit itself.
+    private var frontmostOtherApp: NSRunningApplication? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return nil
+        }
+        return app
+    }
+
+    private func quitFrontmostApp(force: Bool) {
+        guard let app = frontmostOtherApp else { return }
+        if force {
+            app.forceTerminate()
+        } else {
+            app.terminate()
+        }
+    }
+
+    /// Quits the frontmost app gracefully and relaunches it once it has exited.
+    /// If the app doesn't quit (e.g. an unsaved-changes prompt is cancelled), it is left alone.
+    private func restartFrontmostApp() {
+        guard restartTask == nil,
+              let app = frontmostOtherApp,
+              let bundleURL = app.bundleURL else {
+            return
+        }
+
+        guard app.terminate() else { return }
+
+        restartTask = Task { @MainActor [weak self] in
+            defer { self?.restartTask = nil }
+            // Wait up to 30s for the app to exit (leaves time to answer save prompts).
+            for _ in 0..<300 {
+                if app.isTerminated { break }
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { return }
+            }
+            guard app.isTerminated else { return }
+
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            configuration.createsNewApplicationInstance = false
+            _ = try? await NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration)
+        }
     }
 
     private func sleepComputer() {
