@@ -19,6 +19,8 @@ struct ClipboardHistoryItem: Identifiable, Codable, Equatable {
     var copiedAt: Date
     var sourceAppName: String?
     var isPinned: Bool
+    /// User-chosen name shown in the list instead of the content preview.
+    var customTitle: String?
 
     init(
         id: UUID,
@@ -56,6 +58,7 @@ struct ClipboardHistoryItem: Identifiable, Codable, Equatable {
         copiedAt = try container.decode(Date.self, forKey: .copiedAt)
         sourceAppName = try container.decodeIfPresent(String.self, forKey: .sourceAppName)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
     }
 
     var previewLines: String {
@@ -155,6 +158,16 @@ final class ClipboardHistoryStore: ObservableObject {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].isPinned.toggle()
         trimToLimit()
+        save()
+    }
+
+    /// Sets the list title for an item; an empty name restores the content preview.
+    func rename(id: ClipboardHistoryItem.ID, to name: String) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newTitle = trimmed.isEmpty ? nil : trimmed
+        guard items[index].customTitle != newTitle else { return }
+        items[index].customTitle = newTitle
         save()
     }
 

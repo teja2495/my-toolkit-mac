@@ -74,6 +74,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         // Focus the most recent copy, even when pinned items are listed above it.
         viewModel.selectedID = store.items.first(where: { !$0.isPinned })?.id ?? store.items.first?.id
         viewModel.multiSelectedIDs = []
+        viewModel.renamingID = nil
 
         panel.setFrame(centeredFrame(), display: true)
         NSApp.activate(ignoringOtherApps: true)
@@ -90,7 +91,9 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === self.panel, let key = Self.key(for: event) else { return event }
+            // While a row is being renamed, let the text field receive every key.
+            guard let self, event.window === self.panel, self.viewModel.renamingID == nil,
+                  let key = Self.key(for: event) else { return event }
             return self.viewModel.keyHandler?(key) == true ? nil : event
         }
     }
@@ -180,6 +183,8 @@ final class ClipboardHistoryViewModel: ObservableObject {
     @Published var selectedID: ClipboardHistoryItem.ID?
     /// Items picked with ⌘-click, in the order they were picked.
     @Published var multiSelectedIDs: [ClipboardHistoryItem.ID] = []
+    /// Item whose title is currently being edited inline.
+    @Published var renamingID: ClipboardHistoryItem.ID?
     /// Set by the view; returns true when the key was handled.
     var keyHandler: ((Key) -> Bool)?
 }

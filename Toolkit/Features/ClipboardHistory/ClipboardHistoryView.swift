@@ -8,6 +8,8 @@ struct ClipboardHistoryView: View {
     let onPaste: ([ClipboardHistoryItem]) -> Void
     let onClose: () -> Void
 
+    @AppStorage("clipboardHistoryPinnedCollapsed") private var isPinnedCollapsed = false
+
     private static let darkBackground = Color(red: 0.118, green: 0.118, blue: 0.125)
     private static let accent = Color(red: 0.93, green: 0.62, blue: 0.27)
 
@@ -19,8 +21,8 @@ struct ClipboardHistoryView: View {
     private var pinnedItems: [ClipboardHistoryItem] { store.items.filter(\.isPinned) }
     private var recentItems: [ClipboardHistoryItem] { store.items.filter { !$0.isPinned } }
 
-    /// Items in on-screen order: pinned section first, then recent.
-    private var displayItems: [ClipboardHistoryItem] { pinnedItems + recentItems }
+    /// Items in on-screen order: pinned section first (unless collapsed), then recent.
+    private var displayItems: [ClipboardHistoryItem] { (isPinnedCollapsed ? [] : pinnedItems) + recentItems }
 
     /// ⌘-clicked items in pick order, or just the focused item when nothing is multi-selected.
     private var itemsToCopy: [ClipboardHistoryItem] {
@@ -53,6 +55,18 @@ struct ClipboardHistoryView: View {
             if selectedItem == nil {
                 model.selectedID = recentItems.first?.id ?? pinnedItems.first?.id
             }
+            if let renamingID = model.renamingID, !ids.contains(renamingID) {
+                model.renamingID = nil
+            }
+        }
+        .onChange(of: isPinnedCollapsed) {
+            guard isPinnedCollapsed else { return }
+            let pinnedIDs = Set(pinnedItems.map(\.id))
+            model.multiSelectedIDs.removeAll { pinnedIDs.contains($0) }
+            if let renamingID = model.renamingID, pinnedIDs.contains(renamingID) { model.renamingID = nil }
+            if let selected = model.selectedID, pinnedIDs.contains(selected) {
+                model.selectedID = recentItems.first?.id
+            }
         }
     }
 
@@ -72,7 +86,7 @@ struct ClipboardHistoryView: View {
                 }
             }
                 .padding(.horizontal, 20)
-                .padding(.top, 26)
+                .padding(.top, 16)
                 .padding(.bottom, 12)
 
             if store.items.isEmpty {
@@ -83,8 +97,10 @@ struct ClipboardHistoryView: View {
                         LazyVStack(alignment: .leading, spacing: 2) {
                             let pinned = pinnedItems
                             if !pinned.isEmpty {
-                                sectionHeader("Pinned", systemImage: "pin.fill")
-                                ForEach(pinned) { item in row(for: item) }
+                                pinnedHeader(count: pinned.count)
+                                if !isPinnedCollapsed {
+                                    ForEach(pinned) { item in row(for: item) }
+                                }
                                 sectionHeader("Recent", systemImage: "clock")
                                     .padding(.top, 10)
                             }
@@ -118,17 +134,58 @@ struct ClipboardHistoryView: View {
         .padding(.bottom, 4)
     }
 
+    private func pinnedHeader(count: Int) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { isPinnedCollapsed.toggle() }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isPinnedCollapsed ? 0 : 90))
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("PINNED")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .tracking(1.1)
+                if isPinnedCollapsed {
+                    Text("\(count)")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .foregroundStyle(.secondary.opacity(0.8))
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isPinnedCollapsed ? "Show pinned items" : "Hide pinned items")
+    }
+
     private func row(for item: ClipboardHistoryItem) -> some View {
         ClipboardHistoryRow(
             item: item,
             store: store,
             isSelected: item.id == model.selectedID || model.multiSelectedIDs.contains(item.id),
+            isRenaming: model.renamingID == item.id,
+            onRename: { name in
+                store.rename(id: item.id, to: name)
+                model.renamingID = nil
+            },
+            onCancelRename: { model.renamingID = nil },
             onDelete: { delete(id: item.id) }
         )
         .id(item.id)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { onCopy([item]) }
+        .onTapGesture(count: 2) {
+            guard model.renamingID != item.id else { return }
+            onCopy([item])
+        }
         .onTapGesture {
+            guard model.renamingID != item.id else { return }
+            model.renamingID = nil
             if NSEvent.modifierFlags.contains(.command) {
                 toggleMultiSelection(item)
             } else {
@@ -137,6 +194,11 @@ struct ClipboardHistoryView: View {
             }
         }
         .contextMenu {
+            Button("Rename") {
+                model.multiSelectedIDs = []
+                model.selectedID = item.id
+                model.renamingID = item.id
+            }
             Button(item.isPinned ? "Unpin" : "Pin") {
                 store.togglePin(id: item.id)
             }
@@ -227,7 +289,7 @@ struct ClipboardHistoryView: View {
             VStack(alignment: .leading, spacing: 0) {
                 detailHeader(for: item)
                     .padding(.horizontal, 24)
-                    .padding(.top, 26)
+                    .padding(.top, 16)
                     .padding(.bottom, 14)
 
                 Rectangle()
@@ -311,10 +373,15 @@ private struct ClipboardHistoryRow: View {
     let item: ClipboardHistoryItem
     let store: ClipboardHistoryStore
     let isSelected: Bool
+    let isRenaming: Bool
+    let onRename: (String) -> Void
+    let onCancelRename: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovered = false
     @State private var isDeleteHovered = false
+    @State private var draftName = ""
+    @FocusState private var isNameFieldFocused: Bool
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -325,17 +392,46 @@ private struct ClipboardHistoryRow: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(item.kind == .image ? .secondary : .primary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if isRenaming {
+                    TextField("Name", text: $draftName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.black.opacity(0.25))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                        )
+                        .focused($isNameFieldFocused)
+                        .onSubmit { onRename(draftName) }
+                        .onExitCommand { onCancelRename() }
+                        .onAppear {
+                            draftName = item.customTitle ?? ""
+                            DispatchQueue.main.async { isNameFieldFocused = true }
+                        }
+                        .onChange(of: isNameFieldFocused) {
+                            // Clicking elsewhere commits the name, like Finder.
+                            if !isNameFieldFocused && isRenaming { onRename(draftName) }
+                        }
+                } else {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: item.customTitle == nil ? .regular : .medium))
+                        .foregroundStyle(item.kind == .image && item.customTitle == nil ? .secondary : .primary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-                Text(subtitle)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                if !item.isPinned {
+                    Text(subtitle)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
 
             Button(action: onDelete) {
@@ -365,6 +461,7 @@ private struct ClipboardHistoryRow: View {
     }
 
     private var title: String {
+        if let customTitle = item.customTitle { return customTitle }
         switch item.kind {
         case .text:
             return item.previewLines
