@@ -9,6 +9,13 @@ final class CornerNotesFeature: AppFeature {
     private var pollTimer: Timer?
     private var wasInHotCorner = false
 
+    /// When set, the hot-corner gesture launches/activates this app instead of showing the notes panel.
+    var openAppURL: URL? {
+        didSet {
+            if openAppURL != nil { panelController.hide() }
+        }
+    }
+
     func start() {
         guard pollTimer == nil else { return }
 
@@ -36,7 +43,9 @@ final class CornerNotesFeature: AppFeature {
         let isInHotCorner = hotCornerFrame?.contains(mouseLocation) == true
 
         if isInHotCorner, !wasInHotCorner {
-            if panelController.isVisible {
+            if let openAppURL {
+                openApp(at: openAppURL)
+            } else if panelController.isVisible {
                 panelController.hide()
             } else {
                 panelController.show(near: hotCornerFrame)
@@ -44,6 +53,12 @@ final class CornerNotesFeature: AppFeature {
         }
 
         wasInHotCorner = isInHotCorner
+    }
+
+    private func openApp(at url: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
     }
 
     private func bottomRightHotCornerFrame(containing point: CGPoint) -> CGRect? {
@@ -59,3 +74,4 @@ final class CornerNotesFeature: AppFeature {
         )
     }
 }
+

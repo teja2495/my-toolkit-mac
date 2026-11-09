@@ -21,6 +21,20 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var cornerNotesOpenAppInstead: Bool {
+        didSet {
+            UserDefaults.standard.set(cornerNotesOpenAppInstead, forKey: Self.cornerNotesOpenAppInsteadKey)
+            applyCornerNotesSettings()
+        }
+    }
+
+    @Published var cornerNotesAppPath: String {
+        didSet {
+            UserDefaults.standard.set(cornerNotesAppPath, forKey: Self.cornerNotesAppPathKey)
+            applyCornerNotesSettings()
+        }
+    }
+
     @Published var dockHoverPopupDelay: Double {
         didSet {
             UserDefaults.standard.set(dockHoverPopupDelay, forKey: Self.dockHoverPopupDelayKey)
@@ -31,8 +45,8 @@ final class AppBootstrapper: ObservableObject {
     @Published private(set) var availableFeatures: [FeatureDescriptor] = [
         FeatureDescriptor(
             id: "corner-notes",
-            title: "Quick Notes & Tasks",
-            summary: "Opens a two-pane todo checklist and note window from the bottom-right corner.",
+            title: "Bottom Right Hot Corner",
+            summary: "Moving the pointer to the bottom-right corner opens Quick Notes & Tasks or an app of your choice.",
             requiresAccessibilityAccess: false,
             isEnabled: false
         ),
@@ -213,6 +227,8 @@ final class AppBootstrapper: ObservableObject {
     private static let textExpanderEntriesKey = "textExpanderEntries"
     private static let mediaControlsHoverDelayKey = "mediaControlsHoverDelay"
     private static let dockHoverPopupDelayKey = "dockHoverPopupDelay"
+    private static let cornerNotesOpenAppInsteadKey = "cornerNotesOpenAppInstead"
+    private static let cornerNotesAppPathKey = "cornerNotesAppPath"
     private static let defaultMediaControlsHoverDelay = 0.0
     private static let defaultDockHoverPopupDelay = 2.0
     private static let legacyDockHoverPopupDelay = 0.25
@@ -231,6 +247,8 @@ final class AppBootstrapper: ObservableObject {
 
     init() {
         mediaControlsHoverDelay = UserDefaults.standard.object(forKey: Self.mediaControlsHoverDelayKey) as? Double ?? Self.defaultMediaControlsHoverDelay
+        cornerNotesOpenAppInstead = UserDefaults.standard.bool(forKey: Self.cornerNotesOpenAppInsteadKey)
+        cornerNotesAppPath = UserDefaults.standard.string(forKey: Self.cornerNotesAppPathKey) ?? ""
         let savedDelay = UserDefaults.standard.object(forKey: Self.dockHoverPopupDelayKey) as? Double
         let resolvedDelay: Double
         if let savedDelay, abs(savedDelay - Self.legacyDockHoverPopupDelay) < 0.001 {
@@ -368,6 +386,7 @@ final class AppBootstrapper: ObservableObject {
 
     private func updateFeatureLifecycle() {
         ensureFeatureExists(CornerNotesFeature())
+        applyCornerNotesSettings()
         ensureFeatureExists(SystemHealthFeature())
         let mediaControlsFeature = MediaControlsFeature()
         mediaControlsFeature.hoverDelay = max(0, mediaControlsHoverDelay)
@@ -415,6 +434,13 @@ final class AppBootstrapper: ObservableObject {
                 feature.stop()
             }
         }
+    }
+
+    private func applyCornerNotesSettings() {
+        guard let feature = liveFeatures["corner-notes"] as? CornerNotesFeature else { return }
+        feature.openAppURL = cornerNotesOpenAppInstead && !cornerNotesAppPath.isEmpty
+            ? URL(fileURLWithPath: cornerNotesAppPath)
+            : nil
     }
 
     private func ensureFeatureExists(_ feature: AppFeature) {

@@ -68,6 +68,9 @@ final class WindowShortcutsFeature: AppFeature {
     static let quitAppShortcutTitle = "Quit focused app"
     static let forceQuitAppShortcutSymbol = "⌥ ⇧ Q"
     static let forceQuitAppShortcutTitle = "Force quit focused app"
+    static let openEnpassShortcutSymbol = "⌥ E"
+    static let openEnpassShortcutTitle = "Open Enpass"
+    private static let enpassBundleIdentifier = "in.sinew.Enpass-Desktop"
 
     private var hotKeys: [HotKey] = []
 
@@ -133,6 +136,18 @@ final class WindowShortcutsFeature: AppFeature {
         ) {
             hotKeys.append(forceQuitHotKey)
         }
+        if let enpassHotKey = HotKey(
+            carbonKeyCode: kVK_ANSI_E,
+            carbonModifiers: optionKey,
+            onKeyDown: { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.openEnpass()
+                }
+            },
+            onKeyUp: {}
+        ) {
+            hotKeys.append(enpassHotKey)
+        }
     }
 
     func stop() {
@@ -188,6 +203,15 @@ final class WindowShortcutsFeature: AppFeature {
             configuration.createsNewApplicationInstance = false
             _ = try? await NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration)
         }
+    }
+
+    private func openEnpass() {
+        let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.enpassBundleIdentifier)
+            ?? URL(fileURLWithPath: "/Applications/Enpass.app")
+        guard FileManager.default.fileExists(atPath: appURL.path) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in }
     }
 
     private func sleepComputer() {
