@@ -179,12 +179,10 @@ final class DockWindowPopupController {
     private let vscodeGitRepos = VSCodeGitRepoModel()
     private var hostingController: NSHostingController<AnyView>
     private var latestFocusRequestID: UInt64 = 0
-    private var initialWindowCount: Int = 0
     private var anchoredDockItemFrame: CGRect = .zero
     private var latestPreferredSizeInputs: (
         app: DockHoveredApplication,
-        windows: [WindowInfo],
-        hideWindowsList: Bool
+        windows: [WindowInfo]
     )?
     var onPinnedFoldersPersist: (([VSCodeFolderShortcut]) -> Void)?
 
@@ -224,8 +222,6 @@ final class DockWindowPopupController {
         windows: [WindowInfo],
         vscodeFolderShortcuts: [VSCodeFolderShortcut]
     ) {
-        initialWindowCount = windows.count
-        let hideWindowsList = initialWindowCount == 1
         anchoredDockItemFrame = app.dockItemFrame
         if isVSCodeBundle(app.bundleIdentifier) {
             vscodePinnedFolders.folders = vscodeFolderShortcuts
@@ -236,8 +232,8 @@ final class DockWindowPopupController {
                     + vscodeFolderShortcuts.map(\.path)
             )
         }
-        setView(for: app, windows: windows, hideWindowsList: hideWindowsList)
-        let size = preferredSize(for: app, windows: windows, hideWindowsList: hideWindowsList)
+        setView(for: app, windows: windows)
+        let size = preferredSize(for: app, windows: windows)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
         panel.orderFrontRegardless()
     }
@@ -247,13 +243,12 @@ final class DockWindowPopupController {
         windows: [WindowInfo],
         vscodeFolderShortcuts: [VSCodeFolderShortcut]
     ) {
-        let hideWindowsList = initialWindowCount == 1
         anchoredDockItemFrame = app.dockItemFrame
         if isVSCodeBundle(app.bundleIdentifier) {
             vscodePinnedFolders.folders = vscodeFolderShortcuts
         }
-        setView(for: app, windows: windows, hideWindowsList: hideWindowsList)
-        let size = preferredSize(for: app, windows: windows, hideWindowsList: hideWindowsList)
+        setView(for: app, windows: windows)
+        let size = preferredSize(for: app, windows: windows)
         panel.setFrame(frame(for: size, anchoredTo: app.dockItemFrame), display: true)
     }
 
@@ -265,10 +260,9 @@ final class DockWindowPopupController {
 
     private func setView(
         for app: DockHoveredApplication,
-        windows: [WindowInfo],
-        hideWindowsList: Bool
+        windows: [WindowInfo]
     ) {
-        latestPreferredSizeInputs = (app, windows, hideWindowsList)
+        latestPreferredSizeInputs = (app, windows)
         let runningApp = NSRunningApplication(processIdentifier: app.processIdentifier)
         let icon = runningApp?.icon ?? app.bundleURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
         let isAppFocused = runningApp?.isActive ?? false
@@ -286,18 +280,8 @@ final class DockWindowPopupController {
                 isVSCodeApp: isVSCodeApp,
                 showNewWindowButton: showNewWindowButton,
                 isAppFocused: isAppFocused,
-                hideWindowsList: hideWindowsList,
                 onHide: { [weak self] in
                     self?.closeAllWindows(processIdentifier: app.processIdentifier)
-                },
-                onRestart: { [weak self] in
-                    self?.restartApplication(processIdentifier: app.processIdentifier)
-                },
-                onQuit: { [weak self] in
-                    self?.quitApplication(processIdentifier: app.processIdentifier)
-                },
-                onForceQuit: { [weak self] in
-                    self?.forceQuitApplication(processIdentifier: app.processIdentifier)
                 },
                 onOpen: { [weak self] windowInfo in
                     self?.focusWindow(windowInfo, foregroundProcessIdentifier: foregroundProcessIdentifier)
@@ -373,8 +357,7 @@ final class DockWindowPopupController {
         guard panel.isVisible, let inputs = latestPreferredSizeInputs else { return }
         let size = preferredSize(
             for: inputs.app,
-            windows: inputs.windows,
-            hideWindowsList: inputs.hideWindowsList
+            windows: inputs.windows
         )
         panel.setFrame(frame(for: size, anchoredTo: anchoredDockItemFrame), display: true)
     }
@@ -588,14 +571,9 @@ final class DockWindowPopupController {
 
     private func preferredSize(
         for app: DockHoveredApplication,
-        windows: [WindowInfo],
-        hideWindowsList: Bool
+        windows: [WindowInfo]
     ) -> CGSize {
         let width = 340.0
-
-        if (windows.isEmpty || hideWindowsList) && !isVSCodeBundle(app.bundleIdentifier) {
-            return CGSize(width: width, height: 110)
-        }
 
         // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
@@ -619,7 +597,7 @@ final class DockWindowPopupController {
             height += 6.0 + 44.0
         } else {
             let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
-            let rowCount = hideWindowsList ? newWindowRow : Array(windows.prefix(8)).count + newWindowRow
+            let rowCount = Array(windows.prefix(8)).count + newWindowRow
             if rowCount > 0 {
                 height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
             }
@@ -659,119 +637,6 @@ final class DockWindowPopupController {
                 app.isHidden
             }
             hide()
-        }
-    }
-
-    private func quitApplication(processIdentifier: pid_t) {
-        // Dismiss immediately so the popup never lingers while the app handles its quit flow.
-        hide()
-        guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
-        _ = app.terminate()
-        Task { @MainActor in
-            await waitForApplicationTransition {
-                app.isTerminated
-            }
-        }
-    }
-
-    private func restartApplication(processIdentifier: pid_t) {
-        // Dismiss immediately; termination and relaunch can take a few seconds.
-        hide()
-        guard let app = NSRunningApplication(processIdentifier: processIdentifier),
-              let bundleURL = app.bundleURL else { return }
-        let bundleIdentifier = app.bundleIdentifier
-
-        // Capture path up front; NSRunningApplication may become stale after quit.
-        let launchURL = bundleURL.standardizedFileURL
-        let oldPID = processIdentifier
-        _ = app.terminate()
-
-        Task { @MainActor in
-            // Use the kernel process table as the source of truth; NSRunningApplication
-            // state can lag behind the actual process exit.
-            let hasExited = { app.isTerminated && !Self.isProcessAlive(oldPID) }
-
-            var didTerminate = await waitForApplicationTransition(timeout: 8, condition: hasExited)
-
-            // Soft quit can hang on save sheets; escalate so restart always completes.
-            if !didTerminate {
-                _ = app.forceTerminate()
-                didTerminate = await waitForApplicationTransition(timeout: 3, condition: hasExited)
-            }
-            if !didTerminate {
-                kill(oldPID, SIGKILL)
-                _ = await waitForApplicationTransition(timeout: 3) { !Self.isProcessAlive(oldPID) }
-            }
-
-            // Wait until Launch Services no longer lists this app as running; otherwise
-            // a launch request just "activates" the dying instance and nothing comes back.
-            _ = await waitForApplicationTransition(timeout: 5) {
-                Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL).isEmpty
-            }
-
-            // Brief settle so relaunch is not rejected as a duplicate launch.
-            try? await Task.sleep(nanoseconds: 300_000_000)
-
-            // Retry until a fresh instance is confirmed running.
-            for attempt in 0..<5 {
-                await Self.launchApplication(at: launchURL, useOpenCommand: attempt >= 2)
-
-                let relaunched = await waitForApplicationTransition(timeout: 4) {
-                    Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL)
-                        .contains { $0.processIdentifier != oldPID }
-                }
-                if relaunched {
-                    Self.runningInstances(bundleIdentifier: bundleIdentifier, bundleURL: launchURL)
-                        .first { $0.processIdentifier != oldPID }?
-                        .activate()
-                    return
-                }
-
-                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
-            }
-        }
-    }
-
-    private static func isProcessAlive(_ pid: pid_t) -> Bool {
-        if kill(pid, 0) == 0 { return true }
-        return errno == EPERM
-    }
-
-    private static func runningInstances(bundleIdentifier: String?, bundleURL: URL) -> [NSRunningApplication] {
-        NSWorkspace.shared.runningApplications.filter { candidate in
-            guard !candidate.isTerminated else { return false }
-            if let bundleIdentifier {
-                return candidate.bundleIdentifier == bundleIdentifier
-            }
-            return candidate.bundleURL?.standardizedFileURL == bundleURL
-        }
-    }
-
-    private static func launchApplication(at url: URL, useOpenCommand: Bool) async {
-        if useOpenCommand {
-            // Fallback for apps that ignore openApplication right after a quit.
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            process.arguments = [url.path]
-            try? process.run()
-            return
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        configuration.createsNewApplicationInstance = false
-        _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-    }
-
-    private func forceQuitApplication(processIdentifier: pid_t) {
-        // Dismiss immediately rather than waiting for force termination to finish.
-        hide()
-        guard let app = NSRunningApplication(processIdentifier: processIdentifier) else { return }
-        _ = app.forceTerminate()
-        Task { @MainActor in
-            await waitForApplicationTransition {
-                app.isTerminated
-            }
         }
     }
 
@@ -832,11 +697,7 @@ private struct DockWindowPopupView: View {
     let isVSCodeApp: Bool
     let showNewWindowButton: Bool
     let isAppFocused: Bool
-    let hideWindowsList: Bool
     let onHide: () -> Void
-    let onRestart: () -> Void
-    let onQuit: () -> Void
-    let onForceQuit: () -> Void
     let onOpen: (WindowInfo) -> Void
     let onClose: (WindowInfo) -> Void
     let onNewWindow: () -> Void
@@ -849,23 +710,12 @@ private struct DockWindowPopupView: View {
 
     var body: some View {
         Group {
-            if (windows.isEmpty || hideWindowsList) && !isVSCodeApp {
-                EmptyAppControlsView(
-                    name: appName,
-                    onRestart: onRestart,
-                    onQuit: onQuit,
-                    onForceQuit: onForceQuit
-                )
-            } else {
                 VStack(spacing: 6) {
                     AppHeaderRow(
                         icon: appIcon,
                         name: appName,
                         showsHideButton: isAppFocused,
-                        onHide: onHide,
-                        onRestart: onRestart,
-                        onQuit: onQuit,
-                        onForceQuit: onForceQuit
+                        onHide: onHide
                     )
 
                     if isVSCodeApp {
@@ -944,19 +794,17 @@ private struct DockWindowPopupView: View {
                     onSubmit: openSelectedVSCodeSearchResult
                 )
                 } else {
-                    if !hideWindowsList {
-                        ForEach(windows) { window in
-                            WindowRow(
-                                icon: appIcon,
-                                title: window.title,
-                                subtitle: nil,
-                                isSelected: false,
-                                onOpen: { onOpen(window) },
-                                onClose: { onClose(window) },
-                                onPin: nil,
-                                onUnpin: nil
-                            )
-                        }
+                    ForEach(windows) { window in
+                        WindowRow(
+                            icon: appIcon,
+                            title: window.title,
+                            subtitle: nil,
+                            isSelected: false,
+                            onOpen: { onOpen(window) },
+                            onClose: { onClose(window) },
+                            onPin: nil,
+                            onUnpin: nil
+                        )
                     }
 
                     if showNewWindowButton {
@@ -973,7 +821,6 @@ private struct DockWindowPopupView: View {
                     }
                 }
             }
-        }
         }
         .padding(8)
         .background(
@@ -1024,58 +871,6 @@ private struct DockWindowPopupView: View {
         }
         guard let folder = selectedFolder ?? vscodeFolderSearch.results.first else { return }
         onOpenVSCodeFolder(VSCodeFolderShortcut(path: folder.path))
-    }
-}
-
-private struct EmptyAppControlsView: View {
-    let name: String
-    let onRestart: () -> Void
-    let onQuit: () -> Void
-    let onForceQuit: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Text(name)
-                .font(.system(size: 15, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(.primary)
-
-            HStack(spacing: 10) {
-                AppControlButton(title: "Quit", action: onQuit)
-                AppControlButton(title: "Restart", action: onRestart)
-                AppControlButton(title: "Force Quit", action: onForceQuit)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .onHover { _ in
-            NSCursor.arrow.set()
-        }
-    }
-}
-
-private struct AppControlButton: View {
-    let title: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(minWidth: 74, minHeight: 34)
-                .padding(.horizontal, 4)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.18))
-                )
-        }
-        .buttonStyle(.plain)
-        .onHover { _ in
-            NSCursor.arrow.set()
-        }
     }
 }
 
@@ -1273,9 +1068,6 @@ private struct AppHeaderRow: View {
     let name: String
     let showsHideButton: Bool
     let onHide: () -> Void
-    let onRestart: () -> Void
-    let onQuit: () -> Void
-    let onForceQuit: () -> Void
     private let actionButtonSize = CGSize(width: 34, height: 24)
 
     var body: some View {
@@ -1295,25 +1087,8 @@ private struct AppHeaderRow: View {
 
             Spacer(minLength: 4)
 
-            HStack(spacing: 8) {
-                if showsHideButton {
-                    HideActionButton(action: onHide, size: actionButtonSize)
-                }
-                ActionButton(
-                    systemImage: "arrow.clockwise",
-                    tint: .white,
-                    backgroundTint: Color.white.opacity(0.16),
-                    size: actionButtonSize,
-                    action: onRestart
-                )
-                QuitActionButton(
-                    systemImage: "power",
-                    tint: .white,
-                    backgroundTint: Color.white.opacity(0.16),
-                    size: actionButtonSize,
-                    onQuit: onQuit,
-                    onForceQuit: onForceQuit
-                )
+            if showsHideButton {
+                HideActionButton(action: onHide, size: actionButtonSize)
             }
         }
         .padding(.horizontal, 12)
@@ -1337,101 +1112,6 @@ private struct HideActionButton: View {
                 )
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct ActionButton: View {
-    let systemImage: String
-    let tint: Color
-    let backgroundTint: Color
-    let size: CGSize
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: size.width, height: size.height)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(backgroundTint)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct QuitActionButton: View {
-    let systemImage: String
-    let tint: Color
-    let backgroundTint: Color
-    let size: CGSize
-    let onQuit: () -> Void
-    let onForceQuit: () -> Void
-
-    var body: some View {
-        MouseButtonActionView(leftAction: onQuit, rightAction: onForceQuit) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: size.width, height: size.height)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(backgroundTint)
-                )
-        }
-        .frame(width: size.width, height: size.height)
-    }
-}
-
-private struct MouseButtonActionView<Content: View>: NSViewRepresentable {
-    let leftAction: () -> Void
-    let rightAction: () -> Void
-    let content: Content
-
-    init(
-        leftAction: @escaping () -> Void,
-        rightAction: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.leftAction = leftAction
-        self.rightAction = rightAction
-        self.content = content()
-    }
-
-    func makeNSView(context: Context) -> MouseButtonHostingView<Content> {
-        let view = MouseButtonHostingView(rootView: content)
-        view.leftAction = leftAction
-        view.rightAction = rightAction
-        return view
-    }
-
-    func updateNSView(_ nsView: MouseButtonHostingView<Content>, context: Context) {
-        nsView.rootView = content
-        nsView.leftAction = leftAction
-        nsView.rightAction = rightAction
-    }
-}
-
-private final class MouseButtonHostingView<Content: View>: NSHostingView<Content> {
-    var leftAction: (() -> Void)?
-    var rightAction: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        leftAction?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        rightAction?()
-    }
-
-    override func otherMouseDown(with event: NSEvent) {
-        if event.buttonNumber == 2 {
-            rightAction?()
-        } else {
-            super.otherMouseDown(with: event)
-        }
     }
 }
 

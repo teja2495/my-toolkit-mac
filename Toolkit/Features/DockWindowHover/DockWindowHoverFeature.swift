@@ -161,7 +161,21 @@ final class DockWindowHoverFeature: AppFeature {
             lastWindowRefreshDate = Date()
         }
 
-        if isSameApp {
+        // Only show the popup when there's more than one window to pick from
+        // (VS Code always shows its folder launcher).
+        if !isVSCode && cachedWindows.count <= 1 {
+            popupController.hide()
+            lastHoveredApplication = hoveredApplication
+            pendingHoveredApplication = nil
+            pendingHoverStartDate = nil
+            isPopupHiddenForSingleWindow = true
+            return
+        }
+
+        let shouldReshowAfterSingleWindow = isSameApp && isPopupHiddenForSingleWindow
+        isPopupHiddenForSingleWindow = false
+
+        if isSameApp && !shouldReshowAfterSingleWindow {
             // VS Code popup owns local search state/focus; avoid rebuilding it every poll tick.
             if !isVSCode {
                 popupController.updateContent(
@@ -181,6 +195,8 @@ final class DockWindowHoverFeature: AppFeature {
             pendingHoverStartDate = nil
         }
     }
+
+    private var isPopupHiddenForSingleWindow = false
 
     private func shouldRefreshWindows() -> Bool {
         Date().timeIntervalSince(lastWindowRefreshDate) >= 0.8
