@@ -24,7 +24,7 @@ struct PermissionsSettingsView: View {
                 PermissionStatusCard(
                     title: "Screen Recording",
                     isGranted: bootstrapper.screenRecordingPermissionManager.isGranted,
-                    missingDescription: "Required for Screenshots. Choose Quit & Reopen when macOS offers it.",
+                    missingDescription: "Required for Screen Capture. Choose Quit & Reopen when macOS offers it.",
                     onGrant: { bootstrapper.requestScreenRecordingAccess() }
                 )
 
@@ -37,7 +37,7 @@ struct PermissionsSettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             BulletRow(text: "Reading the focused text field for inline grammar correction.")
                             BulletRow(text: "Listing window titles of the app under the cursor in the Dock.")
-                            BulletRow(text: "Capturing the area you select with ⌘⇧2 for Screenshots.")
+                            BulletRow(text: "Capturing screenshots (⌘⇧2) and screen recordings (⌘⇧3) for Screen Capture.")
                             BulletRow(text: "No data leaves your Mac — corrections use Apple Intelligence locally.")
                         }
                     }

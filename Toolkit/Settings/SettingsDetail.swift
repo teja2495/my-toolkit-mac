@@ -40,8 +40,8 @@ struct SettingsDetail: View {
             OpenLogiSettingsView(bootstrapper: bootstrapper)
         case "clipboard-history":
             ClipboardHistorySettingsView(bootstrapper: bootstrapper)
-        case "screenshots":
-            ScreenshotsSettingsView(bootstrapper: bootstrapper)
+        case "screen-capture":
+            ScreenCaptureSettingsView(bootstrapper: bootstrapper)
         case "window-shortcuts":
             WindowShortcutsSettingsView(bootstrapper: bootstrapper)
         case "miscellaneous":

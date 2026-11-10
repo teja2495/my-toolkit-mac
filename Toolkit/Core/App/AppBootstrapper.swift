@@ -100,9 +100,9 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
-            id: "screenshots",
-            title: "Screenshots",
-            summary: "⌘⇧2 captures a selected area to the clipboard, then offers Save to Desktop, Open in Preview, or Capture Full Screen.",
+            id: "screen-capture",
+            title: "Screen Capture",
+            summary: "⌘⇧2 captures a selected area to the clipboard; ⌘⇧3 records an area, a full screen, or an app to video.",
             requiresAccessibilityAccess: false,
             isEnabled: true,
             requiresScreenRecordingAccess: true
@@ -199,6 +199,14 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
+    @Published var screenCaptureHidesAppsBeforeRecording: Bool {
+        didSet {
+            UserDefaults.standard.set(screenCaptureHidesAppsBeforeRecording, forKey: Self.screenCaptureHidesAppsBeforeRecordingKey)
+            (liveFeatures["screen-capture"] as? ScreenCaptureFeature)?
+                .hidesAppsBeforeRecording = screenCaptureHidesAppsBeforeRecording
+        }
+    }
+
     @Published var phoneClipboardSyncEnabled: Bool {
         didSet {
             UserDefaults.standard.set(phoneClipboardSyncEnabled, forKey: Self.phoneClipboardSyncEnabledKey)
@@ -245,6 +253,7 @@ final class AppBootstrapper: ObservableObject {
     private static let vscodeFolderShortcutsKey = "vscodeFolderShortcuts"
     private static let accessibilityFeaturesMasterEnabledKey = "accessibilityFeaturesMasterEnabled"
     private static let phoneClipboardSyncEnabledKey = "phoneClipboardSyncEnabled"
+    private static let screenCaptureHidesAppsBeforeRecordingKey = "screenCaptureHidesAppsBeforeRecording"
     private static let featureEnabledKeyPrefix = "featureEnabled."
     private static let defaultWritingFixPrompt = GrammarTypoCorrector.defaultPromptTemplate
 
@@ -272,6 +281,7 @@ final class AppBootstrapper: ObservableObject {
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
+        screenCaptureHidesAppsBeforeRecording = UserDefaults.standard.object(forKey: Self.screenCaptureHidesAppsBeforeRecordingKey) as? Bool ?? true
         openLogiButtonActions = Self.loadOpenLogiActions(key: Self.openLogiButtonActionKey(for:))
         openLogiDoubleClickActions = Self.loadOpenLogiActions(key: Self.openLogiDoubleClickActionKey(for:))
         restoreFeatureEnabledStates()
@@ -399,7 +409,9 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
         ensureFeatureExists(ClipboardHistoryFeature())
-        ensureFeatureExists(ScreenshotsFeature())
+        let screenCaptureFeature = ScreenCaptureFeature()
+        screenCaptureFeature.hidesAppsBeforeRecording = screenCaptureHidesAppsBeforeRecording
+        ensureFeatureExists(screenCaptureFeature)
 
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()

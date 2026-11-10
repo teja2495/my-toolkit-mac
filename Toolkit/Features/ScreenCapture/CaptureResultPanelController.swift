@@ -2,14 +2,17 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 
-enum ScreenshotMenuAction {
-    case saveToDesktop
-    case openInPreview
-    case captureFullScreen
+struct CaptureResultAction: Identifiable {
+    let id = UUID()
+    let title: String
+    let systemImage: String
+    /// Shown in red (e.g. Delete).
+    var isDestructive = false
+    let handler: () -> Void
 }
 
 /// Borderless panels refuse key status by default; this one needs it so Esc reaches it.
-private final class ScreenshotMenuPanel: NSPanel {
+final class CaptureKeyablePanel: NSPanel {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
@@ -27,12 +30,13 @@ private final class ScreenshotMenuPanel: NSPanel {
     }
 }
 
+/// The centered popup shown after a screenshot or recording: thumbnail plus follow-up actions.
 @MainActor
-final class ScreenshotMenuPanelController: NSObject, NSWindowDelegate {
+final class CaptureResultPanelController: NSObject, NSWindowDelegate {
     private static let panelWidth: CGFloat = 280
     private static let autoCloseDelay: TimeInterval = 5
 
-    private let panel: ScreenshotMenuPanel
+    private let panel: CaptureKeyablePanel
     private var outsideClickMonitor: Any?
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
@@ -40,7 +44,7 @@ final class ScreenshotMenuPanelController: NSObject, NSWindowDelegate {
     private var dragStart: (mouse: CGPoint, origin: CGPoint)?
 
     override init() {
-        panel = ScreenshotMenuPanel(
+        panel = CaptureKeyablePanel(
             contentRect: CGRect(x: 0, y: 0, width: Self.panelWidth, height: 200),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -59,17 +63,17 @@ final class ScreenshotMenuPanelController: NSObject, NSWindowDelegate {
         panel.onCancel = { [weak self] in self?.close() }
     }
 
-    /// Shows the menu centered on the screen that contains `point`.
+    /// Shows the popup centered on the screen that contains `point`.
     func show(
-        thumbnail: NSImage,
+        thumbnail: NSImage?,
+        caption: String,
         onScreenAt point: CGPoint,
-        allowsFullScreen: Bool,
-        onAction: @escaping (ScreenshotMenuAction) -> Void
+        actions: [CaptureResultAction]
     ) {
-        let view = ScreenshotMenuView(
+        let view = CaptureResultView(
             thumbnail: thumbnail,
-            allowsFullScreen: allowsFullScreen,
-            onAction: onAction,
+            caption: caption,
+            actions: actions,
             onClose: { [weak self] in self?.close() },
             onHoverChanged: { [weak self] isHovered in self?.setHovered(isHovered) },
             onDragChanged: { [weak self] in self?.dragChanged() },
@@ -127,7 +131,7 @@ final class ScreenshotMenuPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Auto close
 
-    /// Pauses the countdown while the pointer is over the menu and restarts it when it leaves.
+    /// Pauses the countdown while the pointer is over the popup and restarts it when it leaves.
     private func setHovered(_ isHovered: Bool) {
         guard panel.isVisible else { return }
         if isHovered {
@@ -206,10 +210,10 @@ final class ScreenshotMenuPanelController: NSObject, NSWindowDelegate {
     }
 }
 
-private struct ScreenshotMenuView: View {
-    let thumbnail: NSImage
-    let allowsFullScreen: Bool
-    let onAction: (ScreenshotMenuAction) -> Void
+private struct CaptureResultView: View {
+    let thumbnail: NSImage?
+    let caption: String
+    let actions: [CaptureResultAction]
     let onClose: () -> Void
     let onHoverChanged: (Bool) -> Void
     let onDragChanged: () -> Void
@@ -218,38 +222,37 @@ private struct ScreenshotMenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Label("Copied to clipboard", systemImage: "checkmark.circle.fill")
+                Label(caption, systemImage: "checkmark.circle.fill")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
 
                 Spacer(minLength: 0)
 
-                CloseButton(action: onClose)
+                CaptureCloseButton(action: onClose)
             }
             .padding(.leading, 4)
 
-            Image(nsImage: thumbnail)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.1))
-                )
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.1))
+                    )
+            }
 
             VStack(spacing: 2) {
-                ScreenshotMenuButton(title: "Save to Desktop", systemImage: "menubar.dock.rectangle") {
-                    onAction(.saveToDesktop)
-                }
-                ScreenshotMenuButton(title: "Open in Preview", systemImage: "eye") {
-                    onAction(.openInPreview)
-                }
-                if allowsFullScreen {
-                    ScreenshotMenuButton(title: "Capture Full Screen", systemImage: "rectangle.dashed") {
-                        onAction(.captureFullScreen)
-                    }
+                ForEach(actions) { action in
+                    CaptureResultButton(
+                        title: action.title,
+                        systemImage: action.systemImage,
+                        isDestructive: action.isDestructive,
+                        action: action.handler
+                    )
                 }
             }
         }
@@ -271,7 +274,7 @@ private struct ScreenshotMenuView: View {
     }
 }
 
-private struct CloseButton: View {
+struct CaptureCloseButton: View {
     let action: () -> Void
 
     @State private var isHovered = false
@@ -293,12 +296,15 @@ private struct CloseButton: View {
     }
 }
 
-private struct ScreenshotMenuButton: View {
+private struct CaptureResultButton: View {
     let title: String
     let systemImage: String
+    var isDestructive = false
     let action: () -> Void
 
     @State private var isHovered = false
+
+    private var highlight: Color { isDestructive ? .red : .accentColor }
 
     var body: some View {
         Button(action: action) {
@@ -310,13 +316,13 @@ private struct ScreenshotMenuButton: View {
                     .font(.system(size: 13))
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(isHovered ? Color.white : Color.primary)
+            .foregroundStyle(isHovered ? Color.white : (isDestructive ? Color.red : Color.primary))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered ? Color.accentColor : Color.clear)
+                    .fill(isHovered ? highlight : Color.clear)
             )
         }
         .buttonStyle(.plain)
