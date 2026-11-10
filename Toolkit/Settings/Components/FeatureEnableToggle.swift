@@ -3,6 +3,7 @@ import SwiftUI
 struct FeatureEnableToggle: View {
     let isOn: Bool
     let disabled: Bool
+    var disabledHelp: String = "Grant accessibility access to enable this feature"
     let onToggle: () -> Void
 
     var body: some View {
@@ -25,7 +26,7 @@ struct FeatureEnableToggle: View {
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
         .help(disabled
-              ? "Grant accessibility access to enable this feature"
+              ? disabledHelp
               : (isOn ? "Click to disable" : "Click to enable"))
     }
 }

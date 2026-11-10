@@ -11,56 +11,22 @@ struct PermissionsSettingsView: View {
         SettingsPage(
             eyebrow: "App",
             title: "Permissions",
-            subtitle: "These features need accessibility access to read and write text in other apps."
+            subtitle: "Some features need Accessibility access to read and write text in other apps, or Screen Recording access to capture the screen."
         ) {
             VStack(alignment: .leading, spacing: 16) {
-                SettingsCard {
-                    HStack(alignment: .center, spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill((trusted ? Color.green : Color.orange).opacity(0.12))
-                            Image(systemName: trusted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(trusted ? Color.green : Color.orange)
-                        }
-                        .frame(width: 32, height: 32)
+                PermissionStatusCard(
+                    title: "Accessibility",
+                    isGranted: trusted,
+                    missingDescription: "Required for Dock window popup and inline grammar fix.",
+                    onGrant: { bootstrapper.requestAccessibilityAccess() }
+                )
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Accessibility")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(trusted
-                                 ? "Granted — features can run."
-                                 : "Required for Dock window popup and inline grammar fix.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer(minLength: 12)
-
-                        if trusted {
-                            Text("ENABLED")
-                                .font(.system(size: 9, weight: .semibold))
-                                .tracking(1.4)
-                                .foregroundStyle(Color.green)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Capsule().fill(Color.green.opacity(0.12))
-                                )
-                        } else {
-                            Button {
-                                bootstrapper.requestAccessibilityAccess()
-                            } label: {
-                                Text("Grant access")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        }
-                    }
-                }
+                PermissionStatusCard(
+                    title: "Screen Recording",
+                    isGranted: bootstrapper.screenRecordingPermissionManager.isGranted,
+                    missingDescription: "Required for Screenshots. Choose Quit & Reopen when macOS offers it.",
+                    onGrant: { bootstrapper.requestScreenRecordingAccess() }
+                )
 
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 10) {
@@ -71,9 +37,63 @@ struct PermissionsSettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             BulletRow(text: "Reading the focused text field for inline grammar correction.")
                             BulletRow(text: "Listing window titles of the app under the cursor in the Dock.")
+                            BulletRow(text: "Capturing the area you select with ⌘⇧2 for Screenshots.")
                             BulletRow(text: "No data leaves your Mac — corrections use Apple Intelligence locally.")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+private struct PermissionStatusCard: View {
+    let title: String
+    let isGranted: Bool
+    let missingDescription: String
+    let onGrant: () -> Void
+
+    var body: some View {
+        SettingsCard {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill((isGranted ? Color.green : Color.orange).opacity(0.12))
+                    Image(systemName: isGranted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isGranted ? Color.green : Color.orange)
+                }
+                .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(isGranted ? "Granted — features can run." : missingDescription)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                if isGranted {
+                    Text("ENABLED")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.green)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill(Color.green.opacity(0.12))
+                        )
+                } else {
+                    Button(action: onGrant) {
+                        Text("Grant access")
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                 }
             }
         }

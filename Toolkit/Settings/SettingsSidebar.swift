@@ -20,7 +20,8 @@ struct SettingsSidebar: View {
                 ForEach(sidebarFeatures) { feature in
                     FeatureSidebarRow(
                         feature: feature,
-                        accessibilityGranted: bootstrapper.accessibilityPermissionManager.isTrusted
+                        accessibilityGranted: bootstrapper.accessibilityPermissionManager.isTrusted,
+                        screenRecordingGranted: bootstrapper.screenRecordingPermissionManager.isGranted
                     )
                     .tag(SettingsSection.feature(feature.id))
                 }
@@ -73,9 +74,13 @@ struct SettingsSidebar: View {
 private struct FeatureSidebarRow: View {
     let feature: FeatureDescriptor
     let accessibilityGranted: Bool
+    let screenRecordingGranted: Bool
 
     private var statusState: StatusDot.State {
         if feature.requiresAccessibilityAccess && !accessibilityGranted {
+            return .warning
+        }
+        if feature.requiresScreenRecordingAccess && !screenRecordingGranted {
             return .warning
         }
         return feature.isEnabled ? .active : .inactive

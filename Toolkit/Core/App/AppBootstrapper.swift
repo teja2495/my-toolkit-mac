@@ -100,6 +100,14 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
+            id: "screenshots",
+            title: "Screenshots",
+            summary: "⌘⇧2 captures a selected area to the clipboard, then offers Save to Desktop, Open in Preview, or Capture Full Screen.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true,
+            requiresScreenRecordingAccess: true
+        ),
+        FeatureDescriptor(
             id: "window-shortcuts",
             title: "Keyboard Shortcuts",
             summary: "Option+Left/Right snaps the focused window to the left/right half; Option+Up maximizes, Option+Down minimizes.",
@@ -221,6 +229,7 @@ final class AppBootstrapper: ObservableObject {
     }
 
     let accessibilityPermissionManager = AccessibilityPermissionManager()
+    let screenRecordingPermissionManager = ScreenRecordingPermissionManager()
 
     private static let textExpanderEntriesKey = "textExpanderEntries"
     private static let mediaControlsHoverDelayKey = "mediaControlsHoverDelay"
@@ -275,7 +284,13 @@ final class AppBootstrapper: ObservableObject {
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
+        screenRecordingPermissionManager.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
         accessibilityPermissionManager.refreshStatus()
+        screenRecordingPermissionManager.refreshStatus()
         updateFeatureLifecycle()
         startPermissionWatchdog()
         promptForAccessibilityOnLaunchIfNeeded()
@@ -316,12 +331,17 @@ final class AppBootstrapper: ObservableObject {
         updateFeatureLifecycle()
     }
 
+    func requestScreenRecordingAccess() {
+        screenRecordingPermissionManager.requestAccess()
+        updateFeatureLifecycle()
+    }
+
     func toggleFeature(id: String) {
         guard let index = availableFeatures.firstIndex(where: { $0.id == id }) else { return }
         availableFeatures[index].isEnabled.toggle()
         let isEnabled = availableFeatures[index].isEnabled
         UserDefaults.standard.set(isEnabled, forKey: Self.featureEnabledKey(for: id))
-        if isEnabled {
+        if isEnabled && canRun(availableFeatures[index]) {
             liveFeatures[id]?.start()
         } else {
             liveFeatures[id]?.stop()
@@ -355,7 +375,9 @@ final class AppBootstrapper: ObservableObject {
         permissionRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                if self.accessibilityPermissionManager.refreshStatus() {
+                let accessibilityChanged = self.accessibilityPermissionManager.refreshStatus()
+                let screenRecordingChanged = self.screenRecordingPermissionManager.refreshStatus()
+                if accessibilityChanged || screenRecordingChanged {
                     self.updateFeatureLifecycle()
                 }
             }
@@ -377,6 +399,7 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
         ensureFeatureExists(ClipboardHistoryFeature())
+        ensureFeatureExists(ScreenshotsFeature())
 
         if accessibilityPermissionManager.isTrusted {
             let feature = DockWindowHoverFeature()
@@ -410,13 +433,22 @@ final class AppBootstrapper: ObservableObject {
 
         for descriptor in availableFeatures {
             guard let feature = liveFeatures[descriptor.id] else { continue }
-            let canRun = !(descriptor.requiresAccessibilityAccess && !accessibilityFeaturesMasterEnabled)
-            if descriptor.isEnabled && canRun {
+            if descriptor.isEnabled && canRun(descriptor) {
                 feature.start()
             } else {
                 feature.stop()
             }
         }
+    }
+
+    private func canRun(_ descriptor: FeatureDescriptor) -> Bool {
+        if descriptor.requiresAccessibilityAccess && !accessibilityFeaturesMasterEnabled {
+            return false
+        }
+        if descriptor.requiresScreenRecordingAccess && !screenRecordingPermissionManager.isGranted {
+            return false
+        }
+        return true
     }
 
     private func applyCornerNotesSettings() {

@@ -6,4 +6,5 @@ struct FeatureDescriptor: Identifiable {
     let summary: String
     let requiresAccessibilityAccess: Bool
     var isEnabled: Bool
+    var requiresScreenRecordingAccess: Bool = false
 }
