@@ -21,6 +21,10 @@ struct MiscellaneousSettingsView: View {
         bootstrapper.availableFeatures.first(where: { $0.id == "media-controls" })
     }
 
+    private var purePasteFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "pure-paste" })
+    }
+
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
@@ -149,6 +153,29 @@ struct MiscellaneousSettingsView: View {
                                 .padding(.top, -10)
                                 .padding(.leading, 1)
                             }
+                        }
+                    }
+
+                    if mediaControlsFeature != nil, purePasteFeature != nil {
+                        SettingsCardDivider()
+                    }
+
+                    if let purePasteFeature {
+                        SettingsRow(
+                            purePasteFeature.title,
+                            description: purePasteFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { purePasteFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: purePasteFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
                         }
                     }
                 }

@@ -7,7 +7,8 @@ struct SettingsSidebar: View {
     private let embeddedInMiscellaneousFeatureIDs: Set<String> = [
         "corner-notes",
         "system-health",
-        "media-controls"
+        "media-controls",
+        "pure-paste"
     ]
 
     private var sidebarFeatures: [FeatureDescriptor] {

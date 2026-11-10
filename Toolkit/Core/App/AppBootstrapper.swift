@@ -65,6 +65,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: false
         ),
         FeatureDescriptor(
+            id: "pure-paste",
+            title: "Pure Paste",
+            summary: "Strips fonts, sizes, and colors from anything you copy, keeping line breaks and spacing; bullet points become hyphens. ⌥⌘C copies with formatting kept.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "phone-integration",
             title: "Phone",
             summary: "Pairs with Android phones over the local network for secure Toolkit integration.",
@@ -408,6 +415,7 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(mediaControlsFeature)
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
+        ensureFeatureExists(PurePasteFeature())
         ensureFeatureExists(ClipboardHistoryFeature())
         let screenCaptureFeature = ScreenCaptureFeature()
         screenCaptureFeature.hidesAppsBeforeRecording = screenCaptureHidesAppsBeforeRecording
