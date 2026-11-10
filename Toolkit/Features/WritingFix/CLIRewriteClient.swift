@@ -39,7 +39,7 @@ struct CLIRewriteClient {
                 ],
                 installCommand: "npm install -g @openai/codex"
             )
-        case .appleIntelligence, .chatGPT:
+        case .appleIntelligence:
             preconditionFailure("CLIRewriteClient only supports CLI providers.")
         }
     }

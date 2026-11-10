@@ -2,7 +2,6 @@ import Foundation
 
 enum WritingFixProvider: String, Codable, CaseIterable, Identifiable {
     case appleIntelligence
-    case chatGPT
     case codexCLI
 
     var id: String { rawValue }
@@ -11,8 +10,6 @@ enum WritingFixProvider: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .appleIntelligence:
             return "Apple Intelligence"
-        case .chatGPT:
-            return "ChatGPT"
         case .codexCLI:
             return "Codex CLI"
         }
@@ -22,8 +19,6 @@ enum WritingFixProvider: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .appleIntelligence:
             return "apple.intelligence"
-        case .chatGPT:
-            return "bubble.left.and.bubble.right"
         case .codexCLI:
             return "chevron.left.forwardslash.chevron.right"
         }
@@ -66,7 +61,7 @@ struct WritingFixRule: Identifiable, Codable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         trigger = try container.decode(String.self, forKey: .trigger)
         prompt = try container.decode(String.self, forKey: .prompt)
-        provider = try container.decodeIfPresent(WritingFixProvider.self, forKey: .provider)
+        provider = (try? container.decodeIfPresent(WritingFixProvider.self, forKey: .provider))
             ?? .appleIntelligence
     }
 

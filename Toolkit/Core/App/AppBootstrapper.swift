@@ -81,7 +81,7 @@ final class AppBootstrapper: ObservableObject {
         FeatureDescriptor(
             id: "writing-fix",
             title: "Rewritely",
-            summary: "Type a trigger at the end of focused text to rewrite it with Apple Intelligence or ChatGPT.",
+            summary: "Type a trigger at the end of focused text to rewrite it with Apple Intelligence or Codex CLI.",
             requiresAccessibilityAccess: true,
             isEnabled: true
         ),
@@ -167,8 +167,6 @@ final class AppBootstrapper: ObservableObject {
         }
     }
 
-    @Published private(set) var hasWritingFixAPIKey: Bool
-    @Published private(set) var writingFixAPIKeyMask: String?
 
     @Published var vscodeFolderShortcuts: [VSCodeFolderShortcut] {
         didSet {
@@ -261,9 +259,7 @@ final class AppBootstrapper: ObservableObject {
         writingFixRules = Self.loadWritingFixRules()
         writingFixSystemPrompt = UserDefaults.standard.string(forKey: Self.writingFixSystemPromptKey)
             ?? ""
-        let savedWritingFixAPIKey = WritingFixAPIKeyStore.load()
-        hasWritingFixAPIKey = savedWritingFixAPIKey != nil
-        writingFixAPIKeyMask = Self.maskedWritingFixAPIKey(savedWritingFixAPIKey)
+        WritingFixAPIKeyStore.deleteLegacyKey()
         vscodeFolderShortcuts = Self.loadVSCodeFolderShortcuts()
         accessibilityFeaturesMasterEnabled = UserDefaults.standard.object(forKey: Self.accessibilityFeaturesMasterEnabledKey) as? Bool ?? true
         phoneClipboardSyncEnabled = UserDefaults.standard.object(forKey: Self.phoneClipboardSyncEnabledKey) as? Bool ?? true
@@ -318,19 +314,6 @@ final class AppBootstrapper: ObservableObject {
         accessibilityPermissionManager.resetAccessibilityPermission()
         accessibilityPermissionManager.requestAccessIfNeeded()
         updateFeatureLifecycle()
-    }
-
-    func saveWritingFixAPIKey(_ apiKey: String) throws {
-        try WritingFixAPIKeyStore.save(apiKey)
-        let savedAPIKey = WritingFixAPIKeyStore.load()
-        hasWritingFixAPIKey = savedAPIKey != nil
-        writingFixAPIKeyMask = Self.maskedWritingFixAPIKey(savedAPIKey)
-    }
-
-    func deleteWritingFixAPIKey() throws {
-        try WritingFixAPIKeyStore.delete()
-        hasWritingFixAPIKey = false
-        writingFixAPIKeyMask = nil
     }
 
     func toggleFeature(id: String) {
@@ -562,11 +545,6 @@ final class AppBootstrapper: ObservableObject {
               KeyboardShortcuts.getShortcut(for: firstRule.shortcutName) == nil
         else { return }
         KeyboardShortcuts.setShortcut(.init(.g, modifiers: [.command, .shift]), for: firstRule.shortcutName)
-    }
-
-    private static func maskedWritingFixAPIKey(_ apiKey: String?) -> String? {
-        guard let apiKey, !apiKey.isEmpty else { return nil }
-        return "****\(apiKey.suffix(3))"
     }
 
     private static func loadWritingFixRules() -> [WritingFixRule] {

@@ -12,10 +12,6 @@ struct WritingFixSettingsView: View {
     @State private var editingRuleID: UUID?
     @State private var ruleDrafts: [UUID: WritingFixRuleDraft] = [:]
     @State private var systemPromptDraft = ""
-    @State private var apiKeyDraft = ""
-    @State private var isResettingAPIKey = false
-    @State private var apiKeyMessage: String?
-    @State private var apiKeyMessageIsError = false
     @State private var pendingRule: WritingFixRule?
     @State private var ruleValidationErrors: [UUID: String] = [:]
     @FocusState private var focusedTriggerID: UUID?
@@ -32,7 +28,7 @@ struct WritingFixSettingsView: View {
         SettingsPage(
             eyebrow: "Feature",
             title: "Rewritely",
-            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence, ChatGPT, or Codex CLI."
+            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence or Codex CLI."
         ) {
             featureToggle
         } content: {
@@ -40,8 +36,6 @@ struct WritingFixSettingsView: View {
                 if !permissionGranted {
                     PermissionRequiredBanner(bootstrapper: bootstrapper)
                 }
-
-                chatGPTSettings
 
                 cliSettings
 
@@ -112,66 +106,13 @@ struct WritingFixSettingsView: View {
         return bootstrapper.writingFixRules
     }
 
-    private var chatGPTSettings: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("ChatGPT")
-                    .font(.system(size: 13, weight: .semibold))
-
-                Text("The API key is stored in this Mac's Keychain and is only sent to OpenAI when a ChatGPT rule runs.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    if bootstrapper.hasWritingFixAPIKey, !isResettingAPIKey {
-                        Text(bootstrapper.writingFixAPIKeyMask ?? "API key saved")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        Button("Reset") {
-                            isResettingAPIKey = true
-                            apiKeyDraft = ""
-                            apiKeyMessage = nil
-                        }
-                        .controlSize(.small)
-                    } else {
-                        SecureField("OpenAI API key", text: $apiKeyDraft)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button("Save") {
-                            saveAPIKey()
-                        }
-                        .controlSize(.small)
-                        .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if bootstrapper.hasWritingFixAPIKey {
-                            Button("Cancel") {
-                                isResettingAPIKey = false
-                                apiKeyDraft = ""
-                            }
-                            .controlSize(.small)
-                        }
-                    }
-                }
-
-                if let apiKeyMessage {
-                    Text(apiKeyMessage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(apiKeyMessageIsError ? Color.red : Color.green)
-                }
-            }
-        }
-    }
-
     private var cliSettings: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Command-line providers")
                     .font(.system(size: 13, weight: .semibold))
 
-                Text("Codex CLI uses Luna with codex exec. Install and sign in to Codex separately; no API key is stored by Rewritely.")
+                Text("Codex CLI uses Luna with codex exec. Install and sign in to Codex separately.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -562,19 +503,6 @@ struct WritingFixSettingsView: View {
     private func isRuleValid(id: UUID, trigger: String) -> Bool {
         !trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || KeyboardShortcuts.getShortcut(for: .writingFix(ruleID: id)) != nil
-    }
-
-    private func saveAPIKey() {
-        do {
-            try bootstrapper.saveWritingFixAPIKey(apiKeyDraft)
-            apiKeyDraft = ""
-            isResettingAPIKey = false
-            apiKeyMessage = "Saved in Keychain."
-            apiKeyMessageIsError = false
-        } catch {
-            apiKeyMessage = error.localizedDescription
-            apiKeyMessageIsError = true
-        }
     }
 
 }

@@ -41,12 +41,6 @@ struct GrammarTypoCorrector {
                 prompt: prompt,
                 instructions: instructions
             )
-        case .chatGPT:
-            let response = try await ChatGPTRewriteClient().correctedText(
-                for: prompt,
-                systemPrompt: instructions
-            )
-            return clean(response, original: text)
         case .codexCLI:
             let response = try await CLIRewriteClient().correctedText(
                 for: prompt,
