@@ -19,6 +19,7 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
     }
 
     private lazy var resultPanel = CaptureResultPanelController()
+    private var screenshotEditors: [UUID: ScreenshotEditorController] = [:]
     private lazy var recordingToolbar = RecordingToolbarController()
     private let recorder = ScreenRecorder()
 
@@ -82,6 +83,9 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
         recordingHotKey = nil
         resultPanel.close()
         recordingToolbar.close()
+        let editors = Array(screenshotEditors.values)
+        editors.forEach { $0.close() }
+        screenshotEditors.removeAll()
         switch recordingState {
         case .recording:
             stopRecording()
@@ -159,6 +163,9 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
         copyImageToClipboard(pngData: data)
 
         var actions = [
+            CaptureResultAction(title: "Edit", systemImage: "slider.horizontal.3") { [weak self] in
+                self?.editScreenshot(at: url)
+            },
             CaptureResultAction(title: "Save to Desktop", systemImage: "menubar.dock.rectangle") { [weak self] in
                 self?.resultPanel.close()
                 self?.saveToDesktop(url)
@@ -180,6 +187,21 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
             onScreenAt: NSEvent.mouseLocation,
             actions: actions
         )
+    }
+
+    private func editScreenshot(at url: URL) {
+        resultPanel.close()
+        let id = UUID()
+        guard let editor = ScreenshotEditorController(url: url, onCopy: { [weak self] data in
+            self?.copyImageToClipboard(pngData: data)
+        }, onClose: { [weak self] in
+            self?.screenshotEditors.removeValue(forKey: id)
+        }) else {
+            NSSound.beep()
+            return
+        }
+        screenshotEditors[id] = editor
+        editor.present()
     }
 
     /// Writes the original PNG bytes untouched (full native pixel resolution), plus a TIFF built
