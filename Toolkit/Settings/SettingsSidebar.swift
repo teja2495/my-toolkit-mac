@@ -8,7 +8,8 @@ struct SettingsSidebar: View {
         "corner-notes",
         "system-health",
         "media-controls",
-        "pure-paste"
+        "pure-paste",
+        "block-music-autolaunch"
     ]
 
     private var sidebarFeatures: [FeatureDescriptor] {

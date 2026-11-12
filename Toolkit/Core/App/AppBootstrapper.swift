@@ -72,6 +72,13 @@ final class AppBootstrapper: ObservableObject {
             isEnabled: true
         ),
         FeatureDescriptor(
+            id: "block-music-autolaunch",
+            title: "Block Apple Music Auto-Launch",
+            summary: "Stops the play/pause key from opening Apple Music when nothing else is playing. Opening Music yourself still works.",
+            requiresAccessibilityAccess: false,
+            isEnabled: true
+        ),
+        FeatureDescriptor(
             id: "phone-integration",
             title: "Phone",
             summary: "Pairs with Android phones over the local network for secure Toolkit integration.",
@@ -416,6 +423,7 @@ final class AppBootstrapper: ObservableObject {
         ensureFeatureExists(PhoneIntegrationFeature())
         ensureFeatureExists(MiscellaneousFeature())
         ensureFeatureExists(PurePasteFeature())
+        ensureFeatureExists(BlockMusicAutoLaunchFeature())
         ensureFeatureExists(ClipboardHistoryFeature())
         let screenCaptureFeature = ScreenCaptureFeature()
         screenCaptureFeature.hidesAppsBeforeRecording = screenCaptureHidesAppsBeforeRecording

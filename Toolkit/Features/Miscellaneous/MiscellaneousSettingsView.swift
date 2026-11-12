@@ -25,6 +25,10 @@ struct MiscellaneousSettingsView: View {
         bootstrapper.availableFeatures.first(where: { $0.id == "pure-paste" })
     }
 
+    private var blockMusicAutoLaunchFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "block-music-autolaunch" })
+    }
+
     var body: some View {
         SettingsPage(
             eyebrow: "Feature",
@@ -171,6 +175,29 @@ struct MiscellaneousSettingsView: View {
                                     get: { purePasteFeature.isEnabled },
                                     set: { _ in
                                         bootstrapper.toggleFeature(id: purePasteFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+                    }
+
+                    if purePasteFeature != nil, blockMusicAutoLaunchFeature != nil {
+                        SettingsCardDivider()
+                    }
+
+                    if let blockMusicAutoLaunchFeature {
+                        SettingsRow(
+                            blockMusicAutoLaunchFeature.title,
+                            description: blockMusicAutoLaunchFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { blockMusicAutoLaunchFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: blockMusicAutoLaunchFeature.id)
                                     }
                                 )
                             )
