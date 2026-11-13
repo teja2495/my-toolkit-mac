@@ -13,9 +13,10 @@ struct WindowShortcutsSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Keyboard Shortcuts",
-            subtitle: "Global shortcuts that snap the focused window of any app restart, quit or force quit the focused app, put the computer to sleep, or open Enpass."
+            subtitle: "Global shortcuts that snap the focused window of any app restart, quit or force quit the focused app, put the computer to sleep, or open Enpass.",
+            systemImage: "command",
+            isActive: feature?.isEnabled
         ) {
             if let feature {
                 FeatureEnableToggle(isOn: feature.isEnabled, disabled: !permissionGranted) {
@@ -75,12 +76,6 @@ private struct ShortcutBadge: View {
 
     var body: some View {
         Text(symbol)
-            .font(.system(size: 12, design: .monospaced))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.accentColor.opacity(0.12))
-            )
+            .keycapStyle()
     }
 }

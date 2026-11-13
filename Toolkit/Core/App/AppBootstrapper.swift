@@ -48,70 +48,80 @@ final class AppBootstrapper: ObservableObject {
             title: "Bottom Right Hot Corner",
             summary: "Moving the pointer to the bottom-right corner opens Quick Notes & Tasks or an app of your choice.",
             requiresAccessibilityAccess: false,
-            isEnabled: false
+            isEnabled: false,
+            systemImage: "rectangle.inset.bottomright.filled"
         ),
         FeatureDescriptor(
             id: "system-health",
             title: "System Health",
             summary: "Shows a menu bar health dot for CPU, memory, disk, battery, and swap usage.",
             requiresAccessibilityAccess: false,
-            isEnabled: false
+            isEnabled: false,
+            systemImage: "waveform.path.ecg"
         ),
         FeatureDescriptor(
             id: "media-controls",
             title: "Media Controls",
             summary: "Shows playback controls at the top center of notched and non-notched displays.",
             requiresAccessibilityAccess: false,
-            isEnabled: false
+            isEnabled: false,
+            systemImage: "playpause.fill"
         ),
         FeatureDescriptor(
             id: "pure-paste",
             title: "Pure Paste",
             summary: "Strips fonts, sizes, and colors from anything you copy, keeping line breaks and spacing; bullet points become hyphens. ⌥⌘C copies with formatting kept.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "doc.plaintext"
         ),
         FeatureDescriptor(
             id: "block-music-autolaunch",
             title: "Block Apple Music Auto-Launch",
             summary: "Stops the play/pause key from opening Apple Music when nothing else is playing. Opening Music yourself still works.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "speaker.slash"
         ),
         FeatureDescriptor(
             id: "phone-integration",
             title: "Phone",
             summary: "Pairs with Android phones over the local network for secure Toolkit integration.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "smartphone"
         ),
         FeatureDescriptor(
             id: "dock-window-hover",
             title: "App Windows",
             summary: "Shows a popup with open window titles when hovering app icons in the Dock.",
             requiresAccessibilityAccess: true,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "macwindow.on.rectangle"
         ),
         FeatureDescriptor(
             id: "writing-fix",
             title: "Rewritely",
             summary: "Type a trigger at the end of focused text to rewrite it with Apple Intelligence or Codex CLI.",
             requiresAccessibilityAccess: true,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "wand.and.sparkles"
         ),
         FeatureDescriptor(
             id: "text-expander",
             title: "Text Expander",
             summary: "Type a shortcut followed by a space to instantly expand it to the full text in any app.",
             requiresAccessibilityAccess: true,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "text.cursor"
         ),
         FeatureDescriptor(
             id: "clipboard-history",
             title: "Clipboard History",
             summary: "Saves every text and image you copy and shows them in a two-pane history window (⌥V).",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "doc.on.clipboard"
         ),
         FeatureDescriptor(
             id: "screen-capture",
@@ -119,28 +129,32 @@ final class AppBootstrapper: ObservableObject {
             summary: "⌘⇧2 captures a selected area to the clipboard; ⌘⇧3 records an area, a full screen, or an app to video.",
             requiresAccessibilityAccess: false,
             isEnabled: true,
-            requiresScreenRecordingAccess: true
+            requiresScreenRecordingAccess: true,
+            systemImage: "camera.viewfinder"
         ),
         FeatureDescriptor(
             id: "window-shortcuts",
             title: "Keyboard Shortcuts",
             summary: "Option+Left/Right snaps the focused window to the left/right half; Option+Up maximizes, Option+Down minimizes.",
             requiresAccessibilityAccess: true,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "command"
         ),
         FeatureDescriptor(
             id: "openlogi",
             title: "OpenLogi",
             summary: "Customize the front, back, middle, and scroll wheel buttons on your mouse.",
             requiresAccessibilityAccess: true,
-            isEnabled: false
+            isEnabled: false,
+            systemImage: "computermouse"
         ),
         FeatureDescriptor(
             id: "miscellaneous",
             title: "Miscellaneous",
             summary: "Small system tweaks and utility behaviors.",
             requiresAccessibilityAccess: false,
-            isEnabled: true
+            isEnabled: true,
+            systemImage: "slider.horizontal.3"
         )
     ]
 

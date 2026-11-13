@@ -14,9 +14,10 @@ struct DockWindowHoverSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "App Windows",
-            subtitle: "Hover an app icon in the Dock to peek at its open windows by title."
+            subtitle: "Hover an app icon in the Dock to peek at its open windows by title.",
+            systemImage: "macwindow.on.rectangle",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {
@@ -132,11 +133,11 @@ struct PermissionRequiredBanner: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.settingsSurface)
             )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
         )
     }

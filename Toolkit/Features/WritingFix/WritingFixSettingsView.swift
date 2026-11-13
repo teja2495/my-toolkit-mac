@@ -26,9 +26,10 @@ struct WritingFixSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Rewritely",
-            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence or Codex CLI."
+            subtitle: "Use a trigger word or keyboard shortcut to rewrite text with Apple Intelligence or Codex CLI.",
+            systemImage: "wand.and.sparkles",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {
@@ -178,8 +179,7 @@ struct WritingFixSettingsView: View {
             // Trigger row
             HStack(alignment: .center, spacing: 10) {
                 Text(isEditing ? "Trigger word (optional)" : "Trigger")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(1.2)
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 if isEditing {
@@ -200,14 +200,7 @@ struct WritingFixSettingsView: View {
 
                         if !trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Text(trigger)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(Color.accentColor.opacity(0.12))
-                                )
+                                .keycapStyle(monospaced: true)
                         }
 
                         if let shortcut = KeyboardShortcuts.getShortcut(for: rule.shortcutName) {
@@ -268,8 +261,7 @@ struct WritingFixSettingsView: View {
             if isEditing {
                 HStack(alignment: .center, spacing: 10) {
                     Text("Shortcut")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.2)
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
 
                     KeyboardShortcuts.Recorder("", name: rule.shortcutName) { _ in
@@ -279,8 +271,7 @@ struct WritingFixSettingsView: View {
 
                 HStack(alignment: .center, spacing: 10) {
                     Text("Provider")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.2)
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
 
                     Picker("", selection: providerDraftBinding(for: rule.id)) {
@@ -305,8 +296,7 @@ struct WritingFixSettingsView: View {
             // Prompt section
             VStack(alignment: .leading, spacing: 6) {
                 Text("Prompt")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(1.2)
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 if isEditing {

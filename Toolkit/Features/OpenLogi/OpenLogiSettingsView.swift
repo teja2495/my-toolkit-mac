@@ -13,9 +13,10 @@ struct OpenLogiSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "OpenLogi",
-            subtitle: "Customize what your mouse buttons do, inspired by the OpenLogi project."
+            subtitle: "Customize what your mouse buttons do, inspired by the OpenLogi project.",
+            systemImage: "computermouse",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {

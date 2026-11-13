@@ -11,16 +11,16 @@ struct AboutSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "App",
             title: "About",
-            subtitle: "A small collection of opinionated macOS conveniences."
+            subtitle: "A small collection of opinionated macOS conveniences.",
+            systemImage: "sparkles"
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(spacing: 14) {
                             ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                Circle()
                                     .fill(Color.accentColor.opacity(0.18))
                                 Image(systemName: "sparkles")
                                     .font(.system(size: 18, weight: .semibold))
@@ -30,9 +30,10 @@ struct AboutSettingsView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Toolkit")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                                 Text("Version \(appVersion) (\(buildNumber))")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: 11))
+                                    .monospacedDigit()
                                     .foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)

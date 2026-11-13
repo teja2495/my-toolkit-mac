@@ -9,9 +9,10 @@ struct ClipboardHistorySettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Clipboard History",
-            subtitle: "Keeps every text and image you copy. Open the history to browse, preview, and paste past items."
+            subtitle: "Keeps every text and image you copy. Open the history to browse, preview, and paste past items.",
+            systemImage: "doc.on.clipboard",
+            isActive: feature?.isEnabled
         ) {
             if let feature {
                 FeatureEnableToggle(isOn: feature.isEnabled, disabled: false) {
@@ -26,13 +27,7 @@ struct ClipboardHistorySettingsView: View {
                         description: "Global shortcut that shows the clipboard history window."
                     ) {
                         Text(ClipboardHistoryFeature.triggerSymbol)
-                            .font(.system(size: 12, design: .monospaced))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 7)
-                                    .fill(Color.accentColor.opacity(0.12))
-                            )
+                            .keycapStyle()
                     }
 
                     SettingsCardDivider()

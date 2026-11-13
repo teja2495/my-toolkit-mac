@@ -9,9 +9,10 @@ struct MediaControlsSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Media Controls",
-            subtitle: "Shows playback controls at the top center of the display."
+            subtitle: "Shows playback controls at the top center of the display.",
+            systemImage: "playpause.fill",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {

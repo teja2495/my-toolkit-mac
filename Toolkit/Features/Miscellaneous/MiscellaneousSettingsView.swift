@@ -31,9 +31,10 @@ struct MiscellaneousSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Miscellaneous",
-            subtitle: "System-level helper behaviors that do not fit into a dedicated toolkit module."
+            subtitle: "System-level helper behaviors that do not fit into a dedicated toolkit module.",
+            systemImage: "slider.horizontal.3",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {

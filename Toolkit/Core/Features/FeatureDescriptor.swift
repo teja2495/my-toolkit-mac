@@ -7,4 +7,6 @@ struct FeatureDescriptor: Identifiable {
     let requiresAccessibilityAccess: Bool
     var isEnabled: Bool
     var requiresScreenRecordingAccess: Bool = false
+    /// SF Symbol shown in the sidebar and on the feature's settings page.
+    var systemImage: String = "square.grid.2x2"
 }

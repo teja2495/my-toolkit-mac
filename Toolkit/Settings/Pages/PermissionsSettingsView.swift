@@ -9,9 +9,9 @@ struct PermissionsSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "App",
             title: "Permissions",
-            subtitle: "Some features need Accessibility access to read and write text in other apps, or Screen Recording access to capture the screen."
+            subtitle: "Some features need Accessibility access to read and write text in other apps, or Screen Recording access to capture the screen.",
+            systemImage: "lock.shield"
         ) {
             VStack(alignment: .leading, spacing: 16) {
                 PermissionStatusCard(
@@ -57,18 +57,18 @@ private struct PermissionStatusCard: View {
         SettingsCard {
             HStack(alignment: .center, spacing: 14) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill((isGranted ? Color.green : Color.orange).opacity(0.12))
+                    Circle()
+                        .fill((isGranted ? Color.green : Color.orange).opacity(0.14))
                     Image(systemName: isGranted ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(isGranted ? Color.green : Color.orange)
                 }
-                .frame(width: 32, height: 32)
+                .frame(width: 38, height: 38)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                    Text(isGranted ? "Granted — features can run." : missingDescription)
+                    Text(isGranted ? "Features that need this can run." : missingDescription)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -76,15 +76,13 @@ private struct PermissionStatusCard: View {
                 Spacer(minLength: 12)
 
                 if isGranted {
-                    Text("ENABLED")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.4)
+                    Label("Granted", systemImage: "checkmark")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.green)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule().fill(Color.green.opacity(0.12))
-                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.green.opacity(0.16)))
+                        .overlay(Capsule().strokeBorder(Color.green.opacity(0.4), lineWidth: 1))
                 } else {
                     Button(action: onGrant) {
                         Text("Grant access")

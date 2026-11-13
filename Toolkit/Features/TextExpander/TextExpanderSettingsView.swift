@@ -22,9 +22,10 @@ struct TextExpanderSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Text Expander",
-            subtitle: "Type a shortcut followed by a space to instantly expand it to the full text in any app."
+            subtitle: "Type a shortcut followed by a space to instantly expand it to the full text in any app.",
+            systemImage: "text.cursor",
+            isActive: feature?.isEnabled
         ) {
             featureToggle
         } content: {
@@ -100,9 +101,8 @@ struct TextExpanderSettingsView: View {
             if isEditing {
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("SHORTCUT")
-                            .font(.system(size: 9, weight: .semibold))
-                            .tracking(1.2)
+                        Text("Shortcut")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)
                         TextField("shortcut", text: shortcutDraftBinding(for: entry.id))
                             .textFieldStyle(.plain)
@@ -124,9 +124,8 @@ struct TextExpanderSettingsView: View {
                         .padding(.top, 18)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("EXPANDS TO")
-                            .font(.system(size: 9, weight: .semibold))
-                            .tracking(1.2)
+                        Text("Expands to")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.secondary)
                         TextEditor(text: expansionDraftBinding(for: entry.id))
                             .font(.system(size: 12))
@@ -161,14 +160,7 @@ struct TextExpanderSettingsView: View {
             } else {
                 HStack(alignment: .center, spacing: 10) {
                     Text(shortcutDraftBinding(for: entry.id).wrappedValue)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
+                        .keycapStyle(monospaced: true)
 
                     Image(systemName: "arrow.right")
                         .font(.system(size: 10, weight: .medium))

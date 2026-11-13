@@ -17,9 +17,10 @@ struct ScreenCaptureSettingsView: View {
 
     var body: some View {
         SettingsPage(
-            eyebrow: "Feature",
             title: "Screen Capture",
-            subtitle: "Take screenshots of an area, or record an area, a full screen, or a single app to video."
+            subtitle: "Take screenshots of an area, or record an area, a full screen, or a single app to video.",
+            systemImage: "camera.viewfinder",
+            isActive: (feature?.isEnabled ?? false) && permissionGranted
         ) {
             if let feature {
                 FeatureEnableToggle(
@@ -109,13 +110,7 @@ private struct ShortcutBadge: View {
 
     var body: some View {
         Text(symbol)
-            .font(.system(size: 12, design: .monospaced))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.accentColor.opacity(0.12))
-            )
+            .keycapStyle()
     }
 }
 
@@ -155,11 +150,11 @@ private struct SystemShortcutConflictBanner: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.settingsSurface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
         )
     }
@@ -201,11 +196,11 @@ private struct ScreenRecordingPermissionBanner: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.settingsSurface)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
         )
     }

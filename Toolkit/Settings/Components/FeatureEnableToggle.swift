@@ -8,25 +8,19 @@ struct FeatureEnableToggle: View {
 
     var body: some View {
         Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(isOn ? Color.green : Color.secondary.opacity(0.4))
-                    .frame(width: 6, height: 6)
-
-                Text(isOn ? "Enabled" : "Disabled")
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.4)
-                    .foregroundStyle(isOn ? Color.primary : Color.secondary)
+            HStack(spacing: 7) {
+                Image(systemName: "power")
+                    .font(.system(size: 10, weight: .bold))
+                Text(isOn ? "On" : "Off")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .settingsSurface(Capsule(), emphasized: true)
+            .frame(minWidth: 44)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsPillButtonStyle(isActive: isOn))
         .disabled(disabled)
         .opacity(disabled ? 0.5 : 1)
         .help(disabled
               ? disabledHelp
-              : (isOn ? "Click to disable" : "Click to enable"))
+              : (isOn ? "Turn off" : "Turn on"))
+        .accessibilityLabel(isOn ? "Feature on" : "Feature off")
     }
 }

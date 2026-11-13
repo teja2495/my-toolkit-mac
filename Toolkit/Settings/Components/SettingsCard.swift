@@ -7,9 +7,9 @@ struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .padding(20)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .settingsSurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .settingsSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -18,7 +18,7 @@ extension View {
     func settingsSurface<S: InsettableShape>(_ shape: S, emphasized: Bool = false) -> some View {
         self
             .background(shape.fill(emphasized ? Color.settingsSurfaceStrong : Color.settingsSurface))
-            .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 1))
     }
 }
 

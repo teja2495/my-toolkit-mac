@@ -48,18 +48,18 @@ struct SettingsSidebar: View {
         .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                Circle()
                     .fill(Color.accentColor.opacity(0.18))
                     .overlay(
                         Image(systemName: "sparkles")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Color.accentColor)
                     )
-                    .frame(width: 22, height: 22)
+                    .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Toolkit")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                     Text("Settings")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -90,16 +90,26 @@ private struct FeatureSidebarRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            StatusDot(state: statusState)
+            Image(systemName: feature.systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(feature.isEnabled ? Color.primary : Color.secondary)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(feature.isEnabled ? 0.09 : 0.05))
+                )
 
             Text(feature.title)
                 .font(.system(size: 13))
+                .foregroundStyle(feature.isEnabled ? Color.primary : Color.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Spacer(minLength: 0)
+
+            StatusDot(state: statusState)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
         .help(feature.summary)
     }
 }
@@ -111,15 +121,19 @@ private struct NavRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 16)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
 
             Text(title)
                 .font(.system(size: 13))
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 }
