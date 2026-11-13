@@ -24,7 +24,7 @@ struct SettingsDetail: View {
     @ViewBuilder
     private func featureDetail(id: String) -> some View {
         switch id {
-        case "corner-notes", "system-health", "pure-paste", "block-music-autolaunch":
+        case "corner-notes", "system-health", "pure-paste", "block-music-autolaunch", "dock-quit-button":
             MiscellaneousSettingsView(bootstrapper: bootstrapper)
         case "media-controls":
             MediaControlsSettingsView(bootstrapper: bootstrapper)

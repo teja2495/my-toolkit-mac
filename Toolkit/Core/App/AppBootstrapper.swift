@@ -84,6 +84,14 @@ final class AppBootstrapper: ObservableObject {
             systemImage: "speaker.slash"
         ),
         FeatureDescriptor(
+            id: "dock-quit-button",
+            title: "Dock Quit Button",
+            summary: "Hovering a running app's Dock icon shows a round × on its corner; click it to quit the app.",
+            requiresAccessibilityAccess: true,
+            isEnabled: true,
+            systemImage: "xmark.circle"
+        ),
+        FeatureDescriptor(
             id: "phone-integration",
             title: "Phone",
             summary: "Pairs with Android phones over the local network for secure Toolkit integration.",
@@ -455,6 +463,7 @@ final class AppBootstrapper: ObservableObject {
             ensureFeatureExists(TextExpanderFeature())
             ensureFeatureExists(OpenLogiFeature())
             ensureFeatureExists(WindowShortcutsFeature())
+            ensureFeatureExists(DockQuitButtonFeature())
         } else {
             if let feature = liveFeatures.removeValue(forKey: "dock-window-hover") {
                 feature.stop()
@@ -470,6 +479,9 @@ final class AppBootstrapper: ObservableObject {
             }
             if let windowShortcutsFeature = liveFeatures.removeValue(forKey: "window-shortcuts") {
                 windowShortcutsFeature.stop()
+            }
+            if let dockQuitButtonFeature = liveFeatures.removeValue(forKey: "dock-quit-button") {
+                dockQuitButtonFeature.stop()
             }
         }
 

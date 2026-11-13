@@ -9,7 +9,8 @@ struct SettingsSidebar: View {
         "system-health",
         "media-controls",
         "pure-paste",
-        "block-music-autolaunch"
+        "block-music-autolaunch",
+        "dock-quit-button"
     ]
 
     private var sidebarFeatures: [FeatureDescriptor] {

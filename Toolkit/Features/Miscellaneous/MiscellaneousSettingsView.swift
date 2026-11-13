@@ -29,6 +29,10 @@ struct MiscellaneousSettingsView: View {
         bootstrapper.availableFeatures.first(where: { $0.id == "block-music-autolaunch" })
     }
 
+    private var dockQuitButtonFeature: FeatureDescriptor? {
+        bootstrapper.availableFeatures.first(where: { $0.id == "dock-quit-button" })
+    }
+
     var body: some View {
         SettingsPage(
             title: "Miscellaneous",
@@ -204,6 +208,30 @@ struct MiscellaneousSettingsView: View {
                             )
                             .labelsHidden()
                             .toggleStyle(.switch)
+                        }
+                    }
+
+                    if blockMusicAutoLaunchFeature != nil, dockQuitButtonFeature != nil {
+                        SettingsCardDivider()
+                    }
+
+                    if let dockQuitButtonFeature {
+                        SettingsRow(
+                            dockQuitButtonFeature.title,
+                            description: dockQuitButtonFeature.summary
+                        ) {
+                            Toggle(
+                                "",
+                                isOn: Binding(
+                                    get: { dockQuitButtonFeature.isEnabled },
+                                    set: { _ in
+                                        bootstrapper.toggleFeature(id: dockQuitButtonFeature.id)
+                                    }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(!bootstrapper.accessibilityPermissionManager.isTrusted)
                         }
                     }
                 }
