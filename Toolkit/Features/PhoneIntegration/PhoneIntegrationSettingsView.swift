@@ -51,6 +51,7 @@ struct PhoneIntegrationSettingsView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .subtleScrollers()
         }
         .scrollContentBackground(.hidden)
         .overlay {
@@ -418,13 +419,6 @@ struct PhoneIntegrationSettingsView: View {
 
             Spacer(minLength: 0)
 
-            if !controller.isLoadingFiles && !filteredFiles.isEmpty {
-                Text(filteredFiles.count == 1 ? "1 item" : "\(filteredFiles.count) items")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
             Button {
                 controller.refreshFiles()
             } label: {
@@ -490,14 +484,8 @@ struct PhoneIntegrationSettingsView: View {
             LazyVStack(alignment: .leading, spacing: 22) {
                 ForEach(fileGroups) { group in
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(group.title)
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("\(group.files.count)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.tertiary)
-                                .monospacedDigit()
-                        }
+                        Text(group.title)
+                            .font(.system(size: 15, weight: .semibold))
 
                         LazyVGrid(
                             columns: controller.selectedCategory == .photosVideos ? photoGridColumns : otherGridColumns,
@@ -588,30 +576,28 @@ struct PhoneIntegrationSettingsView: View {
         controller.fileItems.sorted { $0.modifiedDate > $1.modifiedDate }
     }
 
+    /// Buckets files into Today, Yesterday, and Older (newest first within each).
     private var fileGroups: [PhoneFileDayGroup] {
         let calendar = Calendar.current
-        let grouped = Dictionary(grouping: filteredFiles) { calendar.startOfDay(for: $0.modifiedDate) }
-        return grouped.keys.sorted(by: >).map { day in
-            PhoneFileDayGroup(
-                id: day,
-                title: dayTitle(for: day),
-                files: (grouped[day] ?? []).sorted { $0.modifiedDate > $1.modifiedDate }
-            )
-        }
-    }
+        var today: [PhoneFileItem] = []
+        var yesterday: [PhoneFileItem] = []
+        var older: [PhoneFileItem] = []
 
-    private func dayTitle(for day: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        let today = calendar.startOfDay(for: Date())
-        if let days = calendar.dateComponents([.day], from: day, to: today).day, days < 7 {
-            return day.formatted(.dateTime.weekday(.wide))
+        for file in filteredFiles {
+            if calendar.isDateInToday(file.modifiedDate) {
+                today.append(file)
+            } else if calendar.isDateInYesterday(file.modifiedDate) {
+                yesterday.append(file)
+            } else {
+                older.append(file)
+            }
         }
-        if calendar.isDate(day, equalTo: today, toGranularity: .year) {
-            return day.formatted(.dateTime.month(.wide).day())
-        }
-        return day.formatted(.dateTime.month(.wide).day().year())
+
+        return [
+            PhoneFileDayGroup(id: "today", title: "Today", files: today),
+            PhoneFileDayGroup(id: "yesterday", title: "Yesterday", files: yesterday),
+            PhoneFileDayGroup(id: "older", title: "Older", files: older)
+        ].filter { !$0.files.isEmpty }
     }
 
     private func availableDeviceLabel(for device: DiscoveredPhoneDevice) -> String {
@@ -1200,7 +1186,7 @@ private extension String {
 }
 
 private struct PhoneFileDayGroup: Identifiable {
-    let id: Date
+    let id: String
     let title: String
     let files: [PhoneFileItem]
 }

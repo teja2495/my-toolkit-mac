@@ -45,6 +45,7 @@ struct SettingsPage<Header: View, Content: View>: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 28)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .subtleScrollers()
         }
         .scrollContentBackground(.hidden)
     }
