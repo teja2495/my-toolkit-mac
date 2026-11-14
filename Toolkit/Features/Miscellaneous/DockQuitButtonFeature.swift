@@ -83,7 +83,22 @@ final class DockQuitButtonFeature: AppFeature {
         suppressedProcessIdentifier = currentApplication.processIdentifier
         self.currentApplication = nil
         badgeController.hide()
-        NSRunningApplication(processIdentifier: currentApplication.processIdentifier)?.terminate()
+
+        guard let application = NSRunningApplication(processIdentifier: currentApplication.processIdentifier) else {
+            return
+        }
+
+        // A background app that needs confirmation before quitting (e.g. QuickTime with an
+        // unsaved recording or edit) shows its "Save?" prompt behind other windows, so the
+        // click looks like it did nothing. Bring it forward if it is still running shortly after.
+        guard application.terminate() else {
+            application.activate()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard !application.isTerminated else { return }
+            application.activate()
+        }
     }
 }
 
