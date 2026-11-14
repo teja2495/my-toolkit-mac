@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreImage
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -62,13 +63,14 @@ final class ScreenshotEditorController: NSWindowController, NSWindowDelegate {
 }
 
 private enum ScreenshotTool: String, CaseIterable {
-    case crop = "Crop", arrow = "Arrow", box = "Box"
+    case crop = "Crop", arrow = "Arrow", box = "Box", blur = "Blur"
 
     var symbol: String {
         switch self {
         case .crop: return "crop"
         case .arrow: return "arrow.up.right"
         case .box: return "rectangle"
+        case .blur: return "drop.halffull"
         }
     }
 
@@ -77,6 +79,7 @@ private enum ScreenshotTool: String, CaseIterable {
         case .crop: return "Drag to select the area you want to keep."
         case .arrow: return "Drag toward the detail you want to point out."
         case .box: return "Drag around a detail to frame it."
+        case .blur: return "Drag over content you want to hide."
         }
     }
 }
@@ -87,8 +90,14 @@ private struct ScreenshotAnnotation {
     let end: CGPoint
     let lineWidth: CGFloat
 
+    var rect: CGRect { CGRect.between(start, end) }
+
     var path: Path {
         Path { path in
+            if tool == .blur {
+                path.addRect(rect)
+                return
+            }
             if tool == .box {
                 path.addRoundedRect(in: CGRect.between(start, end), cornerSize: CGSize(width: lineWidth, height: lineWidth))
             } else {
@@ -151,6 +160,18 @@ private final class ScreenshotEditorModel: ObservableObject {
         max(3, min(state.crop.width, state.crop.height) / 220)
     }
 
+    /// Built once on first use; blur regions reveal this copy of the original capture.
+    lazy var blurredImage: CGImage? = {
+        let source = CIImage(cgImage: image)
+        let sigma = max(12, CGFloat(min(image.width, image.height)) / 70)
+        let blurred = source.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: source.extent)
+        // Blur in the capture's own (gamma-encoded) color space. Core Image's default linear working
+        // space lets light pixels dominate the average, which makes blurred regions look washed out.
+        let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        let context = CIContext(options: [.workingColorSpace: colorSpace, .outputColorSpace: colorSpace])
+        return context.createCGImage(blurred, from: source.extent, format: .RGBA8, colorSpace: colorSpace)
+    }()
+
     func add(_ annotation: ScreenshotAnnotation) {
         remember()
         state.annotations.append(annotation)
@@ -188,14 +209,25 @@ private final class ScreenshotEditorModel: ObservableObject {
             data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { throw CocoaError(.fileWriteUnknown) }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        context.draw(image, in: bounds)
+        if let blurredImage {
+            for annotation in state.annotations where annotation.tool == .blur {
+                // Annotations use top-left origin; the bitmap context is still bottom-left here.
+                let rect = annotation.rect
+                context.saveGState()
+                context.clip(to: CGRect(x: rect.minX, y: CGFloat(image.height) - rect.maxY, width: rect.width, height: rect.height))
+                context.draw(blurredImage, in: bounds)
+                context.restoreGState()
+            }
+        }
         context.translateBy(x: 0, y: CGFloat(image.height))
         context.scaleBy(x: 1, y: -1)
         context.setStrokeColor(Self.ink.cgColor)
         context.setFillColor(Self.ink.cgColor)
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        for annotation in state.annotations {
+        for annotation in state.annotations where annotation.tool != .blur {
             context.setLineWidth(annotation.lineWidth)
             context.addPath(annotation.path.cgPath)
             if annotation.tool == .arrow {
@@ -315,7 +347,16 @@ private struct ScreenshotEditorView: View {
             context.scaleBy(x: scale, y: scale)
             context.translateBy(x: -crop.minX, y: -crop.minY)
             context.draw(Image(decorative: model.image, scale: 1), in: CGRect(x: 0, y: 0, width: model.image.width, height: model.image.height))
-            for annotation in model.state.annotations + (draft.map { [$0] } ?? []) {
+            let annotations = model.state.annotations + (draft.map { [$0] } ?? [])
+            if let blurred = model.blurredImage {
+                for annotation in annotations where annotation.tool == .blur {
+                    context.drawLayer { layer in
+                        layer.clip(to: Path(annotation.rect))
+                        layer.draw(Image(decorative: blurred, scale: 1), in: CGRect(x: 0, y: 0, width: model.image.width, height: model.image.height))
+                    }
+                }
+            }
+            for annotation in annotations where annotation.tool != .blur {
                 if annotation.tool == .arrow {
                     context.fill(annotation.path, with: .color(Color(nsColor: ScreenshotEditorModel.ink)))
                 } else {
@@ -350,7 +391,7 @@ private struct ScreenshotEditorView: View {
             }
             .onEnded { _ in
                 if let draft, hypot(draft.end.x - draft.start.x, draft.end.y - draft.start.y) >= 3 / scale {
-                    if draft.tool != .box || (abs(draft.end.x - draft.start.x) >= 3 / scale && abs(draft.end.y - draft.start.y) >= 3 / scale) {
+                    if draft.tool == .arrow || (abs(draft.end.x - draft.start.x) >= 3 / scale && abs(draft.end.y - draft.start.y) >= 3 / scale) {
                         model.add(draft)
                     }
                 }
