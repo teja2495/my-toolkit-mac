@@ -58,7 +58,8 @@ struct MinimizedApps {
     /// Brings back only what `hideAll()` hid.
     func restore() {
         apps.filter { !$0.isTerminated }.forEach { $0.unhide() }
-        toolkitWindows.forEach { $0.orderFront(nil) }
+        // Behind the other apps: they're Toolkit's own windows, not what the user was working in.
+        toolkitWindows.forEach { $0.orderBack(nil) }
     }
 }
 
@@ -113,13 +114,13 @@ final class RecordingToolbarController: NSObject {
     private var fullScreenTarget: NSScreen? {
         didSet { model.selectedDisplayID = fullScreenTarget?.captureDisplayID }
     }
-    /// Called with the target, the apps hidden for the recording (the caller restores them once the
-    /// recording ends), and whether to record system audio.
-    private var onStart: ((RecordingTarget, MinimizedApps, Bool) -> Void)?
+    /// Called with the target and whether to record system audio.
+    private var onStart: ((RecordingTarget, Bool) -> Void)?
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
-    private var previousFrontApp: NSRunningApplication?
+    /// Toolkit's windows moved out of the way while the toolbar keeps Toolkit active.
+    private var backgroundWindows = BackgroundToolkitWindows()
     /// The last area selected (display + rect in that overlay's view coordinates), restored the
     /// next time the toolbar opens. Kept for the app's lifetime only.
     private var lastSelection: (displayID: CGDirectDisplayID, rect: CGRect)?
@@ -128,13 +129,9 @@ final class RecordingToolbarController: NSObject {
     /// The screen the toolbar was last shown on, so the stop toolbar can appear in the same place.
     private(set) var lastScreen: NSScreen?
 
-    /// Whether starting an area or full-screen recording hides the open apps first.
-    private var hidesApps = true
-
-    func show(hidesApps: Bool, onStart: @escaping (RecordingTarget, MinimizedApps, Bool) -> Void) {
+    func show(onStart: @escaping (RecordingTarget, Bool) -> Void) {
         close()
         self.onStart = onStart
-        self.hidesApps = hidesApps
 
         let mouse = NSEvent.mouseLocation
         let mouseScreen = NSScreen.screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) ?? NSScreen.main
@@ -164,11 +161,9 @@ final class RecordingToolbarController: NSObject {
 
         // While another app is frontmost, the first click on the overlay only brings it into focus,
         // so the first drag never selects anything. Activate Toolkit up front so the first drag
-        // works, and hand focus back to the previous app when the toolbar closes.
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        if frontApp?.processIdentifier != getpid() {
-            previousFrontApp = frontApp
-        }
+        // works, and hand focus back to the previous app when the toolbar closes. Toolkit's own
+        // windows are moved out of the way first so activating doesn't bring Settings to the front.
+        backgroundWindows = .stash()
         NSApp.activate()
 
         restoreLastSelection(fallbackScreen: mouseScreen)
@@ -193,10 +188,9 @@ final class RecordingToolbarController: NSObject {
         toolbarPanel?.orderOut(nil)
         toolbarPanel = nil
         onStart = nil
-        if let previousFrontApp {
-            self.previousFrontApp = nil
-            previousFrontApp.activate()
-        }
+        let backgroundWindows = self.backgroundWindows
+        self.backgroundWindows = BackgroundToolkitWindows()
+        backgroundWindows.restore()
     }
 
     // MARK: - Toolbar
@@ -306,17 +300,8 @@ final class RecordingToolbarController: NSObject {
         guard model.canStart, let target = currentTarget() else { return }
         let onStart = self.onStart
         let recordAudio = model.recordAudio
-        // Area and full-screen recordings start from a clean desktop (unless turned off in
-        // Settings): hide the open apps (and Toolkit's windows). The recording brings them back when
-        // it stops. Recording an app needs its windows, so nothing is hidden then.
-        var hiddenApps = MinimizedApps()
-        if hidesApps && model.mode != .app {
-            hiddenApps = MinimizedApps.hideAll()
-            // Activating the previous app would unhide it again.
-            previousFrontApp = nil
-        }
         close()
-        onStart?(target, hiddenApps, recordAudio)
+        onStart?(target, recordAudio)
     }
 
     /// Picked from the Full Screen dropdown: record that display.

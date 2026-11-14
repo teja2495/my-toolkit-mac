@@ -50,21 +50,9 @@ struct ScreenCaptureSettingsView: View {
 
                         SettingsRow(
                             "Screen recording",
-                            description: "Record an area, a screen, or an app. Press again to stop."
+                            description: "Record an area, a screen, or an app. Starts after a 5-second countdown with an option to minimize open apps. Press again to stop."
                         ) {
                             ShortcutBadge(symbol: ScreenCaptureFeature.recordingSymbol)
-                        }
-
-                        SettingsCardDivider()
-
-                        SettingsRow(
-                            "Minimize apps before recording",
-                            description: "Hide open apps while recording; they come back when it stops."
-                        ) {
-                            Toggle("", isOn: $bootstrapper.screenCaptureHidesAppsBeforeRecording)
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                                .labelsHidden()
                         }
                     }
                 }

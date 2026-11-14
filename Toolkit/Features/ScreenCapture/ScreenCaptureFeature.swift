@@ -13,6 +13,7 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
 
     private enum RecordingState {
         case idle
+        case countingDown
         case starting
         case recording
         case stopping
@@ -26,8 +27,6 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
     private var screenshotHotKey: HotKey?
     private var recordingHotKey: HotKey?
     private var isStarted = false
-    /// Hide open apps (and Toolkit's windows) while an area or full-screen recording runs.
-    var hidesAppsBeforeRecording = true
     private var isCapturingScreenshot = false
 
     private var recordingState: RecordingState = .idle
@@ -39,6 +38,7 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
     private var stopLocalKeyMonitor: Any?
     private lazy var areaIndicator = RecordingAreaIndicator()
     private let stopToolbar = RecordingStopToolbarController()
+    private let countdown = RecordingCountdownController()
     private var appsHiddenForDesktop = MinimizedApps()
 
     override init() {
@@ -87,6 +87,8 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
         editors.forEach { $0.close() }
         screenshotEditors.removeAll()
         switch recordingState {
+        case .countingDown:
+            countdown.cancel()
         case .recording:
             stopRecording()
         case .starting:
@@ -133,18 +135,23 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
 
     private func runScreencapture(arguments: [String], completion: @escaping @MainActor () -> Void) {
         isCapturingScreenshot = true
+        // `screencapture` can hand focus back to Toolkit when it exits, which would bring the
+        // Settings window to the front. Keep it out of the way until the capture is done.
+        let backgroundWindows = BackgroundToolkitWindows.stash()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = arguments
         process.terminationHandler = { _ in
             Task { @MainActor [weak self] in
                 self?.isCapturingScreenshot = false
+                backgroundWindows.restore()
                 completion()
             }
         }
         do {
             try process.run()
         } catch {
+            backgroundWindows.restore()
             isCapturingScreenshot = false
             NSLog("Screen Capture: failed to launch screencapture: \(error)")
         }
@@ -225,9 +232,12 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
                 return
             }
             resultPanel.close()
-            recordingToolbar.show(hidesApps: hidesAppsBeforeRecording) { [weak self] target, hiddenApps, recordAudio in
-                self?.startRecording(target, hiddenApps: hiddenApps, recordAudio: recordAudio)
+            recordingToolbar.show { [weak self] target, recordAudio in
+                self?.beginCountdown(target, recordAudio: recordAudio)
             }
+        case .countingDown:
+            // Pressed again during the countdown: don't record.
+            countdown.cancel()
         case .recording:
             stopRecording()
         case .starting:
@@ -236,6 +246,32 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
         case .stopping:
             break
         }
+    }
+
+    /// Gives the user a few seconds to get ready (and optionally minimize the open apps) before
+    /// the recording starts.
+    private func beginCountdown(_ target: RecordingTarget, recordAudio: Bool) {
+        guard recordingState == .idle else { return }
+        recordingState = .countingDown
+        if case .area(let displayID, let rect) = target {
+            areaIndicator.show(displayID: displayID, rect: rect)
+        }
+        let canMinimize: Bool
+        if case .application = target { canMinimize = false } else { canMinimize = true }
+        countdown.show(
+            on: recordingToolbar.lastScreen,
+            canMinimize: canMinimize,
+            onFinish: { [weak self] minimizedApps in
+                guard let self, self.recordingState == .countingDown else { return }
+                self.recordingState = .idle
+                self.startRecording(target, hiddenApps: minimizedApps, recordAudio: recordAudio)
+            },
+            onCancel: { [weak self] in
+                guard let self, self.recordingState == .countingDown else { return }
+                self.recordingState = .idle
+                self.areaIndicator.hide()
+            }
+        )
     }
 
     private func startRecording(_ target: RecordingTarget, hiddenApps: MinimizedApps, recordAudio: Bool) {
