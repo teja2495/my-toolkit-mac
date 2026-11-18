@@ -73,7 +73,7 @@ struct OpenLogiSettingsView: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
-            .frame(width: 180)
+            .frame(width: 200)
         }
     }
 

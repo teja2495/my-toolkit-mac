@@ -60,6 +60,11 @@ final class PhoneBridgeController: ObservableObject {
     private var connectingConnection: NWConnection?
     private var activePairing: ActivePairing? {
         didSet {
+            if oldValue?.id != activePairing?.id {
+                latestMediaDownloadTimeout?.cancel()
+                latestMediaDownloadTimeout = nil
+                latestMediaCopyState = nil
+            }
             updateClipboardMonitoringIfNeeded()
         }
     }
@@ -72,6 +77,12 @@ final class PhoneBridgeController: ObservableObject {
     private var queuedFileCategories: [PhoneFileCategory] = []
     private var activeFileRequestCategory: PhoneFileCategory?
     private var activeFileTransfers: [String: ActiveFileTransfer] = [:]
+    private enum LatestMediaCopyState {
+        case awaitingList
+        case downloading
+    }
+    private var latestMediaCopyState: LatestMediaCopyState?
+    private var latestMediaDownloadTimeout: Task<Void, Never>?
     private var queuedOutgoingShareFiles: [OutgoingShareFile] = []
     private var activeOutgoingShareRequestIDs: Set<String> = []
     private var activeIncomingShareTransfers: [String: IncomingShareTransfer] = [:]
@@ -350,13 +361,28 @@ final class PhoneBridgeController: ObservableObject {
         processQueuedFileRequestsIfPossible()
     }
 
+    func copyLatestMedia() {
+        guard latestMediaCopyState == nil else { return }
+        guard canRequestFiles else {
+            failLatestMediaCopy("Connect to your Android phone in Toolkit.")
+            return
+        }
+        latestMediaCopyState = .awaitingList
+        if activeFileRequestCategory != .photosVideos {
+            queuedFileCategories.removeAll { $0 == .photosVideos }
+            queuedFileCategories.insert(.photosVideos, at: 0)
+            processQueuedFileRequestsIfPossible()
+        }
+    }
+
+    @discardableResult
     func requestLocalFileURL(
         for file: PhoneFileItem,
         completion: @escaping (Result<URL, Error>) -> Void
-    ) {
+    ) -> String? {
         guard let activePairing else {
             completion(.failure(PhoneBridgeControllerError.noActiveConnection))
-            return
+            return nil
         }
 
         let requestID = UUID().uuidString
@@ -372,6 +398,7 @@ final class PhoneBridgeController: ObservableObject {
             ],
             pairing: activePairing
         )
+        return requestID
     }
 
     func queueFilesForRemoteShare(_ urls: [URL]) {
@@ -797,11 +824,68 @@ final class PhoneBridgeController: ObservableObject {
                 thumbnailData: thumbnailData
             )
         }
-        cachedFileItemsByCategory[responseCategory] = limitedFiles(files, for: responseCategory)
+        let sortedFiles = limitedFiles(files, for: responseCategory)
+        cachedFileItemsByCategory[responseCategory] = sortedFiles
         logger.debug("Rendered file items count=\(files.count) category=\(responseCategory.rawValue, privacy: .public)")
+        if responseCategory == .photosVideos && latestMediaCopyState == .awaitingList {
+            downloadLatestMedia(from: sortedFiles)
+        }
         finishActiveFileRequest()
         refreshVisibleFileItems()
         processQueuedFileRequestsIfPossible()
+    }
+
+    private func downloadLatestMedia(from files: [PhoneFileItem]) {
+        guard let file = files.first(where: {
+            !$0.isDirectory && ($0.mimeType.hasPrefix("image/") || $0.mimeType.hasPrefix("video/"))
+        }) else {
+            failLatestMediaCopy("No photos or videos were found on the phone.")
+            return
+        }
+
+        latestMediaCopyState = .downloading
+        let pairingID = activePairing?.id
+        let requestID = requestLocalFileURL(for: file) { [weak self] result in
+            guard let self, self.activePairing?.id == pairingID else { return }
+            self.latestMediaDownloadTimeout?.cancel()
+            self.latestMediaDownloadTimeout = nil
+            switch result {
+            case .success(let url):
+                self.latestMediaCopyState = nil
+                self.copyMediaToClipboard(url, isImage: file.mimeType.hasPrefix("image/"))
+            case .failure(let error):
+                self.failLatestMediaCopy(error.localizedDescription)
+            }
+        }
+        if let requestID {
+            latestMediaDownloadTimeout = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled else { return }
+                self?.finishFileTransfer(
+                    requestID: requestID,
+                    result: .failure(PhoneBridgeControllerError.remoteFileTransferFailed("The media download timed out."))
+                )
+            }
+        }
+    }
+
+    private func copyMediaToClipboard(_ url: URL, isImage: Bool) {
+        let item = NSPasteboardItem()
+        item.setString(url.absoluteString, forType: .fileURL)
+        if isImage, let tiff = NSImage(contentsOf: url)?.tiffRepresentation {
+            item.setData(tiff, forType: .tiff)
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if !pasteboard.writeObjects([item]) {
+            failLatestMediaCopy("Unable to write the media to the clipboard.")
+        }
+    }
+
+    private func failLatestMediaCopy(_ message: String) {
+        latestMediaCopyState = nil
+        logger.error("Copy phone's latest media failed: \(message, privacy: .public)")
+        NSSound.beep()
     }
 
     private func decodeThumbnailData(from value: Any?) -> Data? {
@@ -858,6 +942,9 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private func finishActiveFileRequest() {
+        if activeFileRequestCategory == .photosVideos && latestMediaCopyState == .awaitingList {
+            failLatestMediaCopy("Unable to load photos and videos from the phone.")
+        }
         fileRequestRetryTask?.cancel()
         fileRequestRetryTask = nil
         activeFileRequestCategory = nil

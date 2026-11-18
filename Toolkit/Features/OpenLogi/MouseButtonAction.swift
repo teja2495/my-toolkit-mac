@@ -8,11 +8,13 @@ enum MouseButtonAction: String, CaseIterable, Identifiable, Codable {
     case missionControl
     case screenshot
     case phoneScreenshot
+    case copyLatestPhoneMedia
     case quitAndReopen
 
     /// Actions offered for a single click.
     static let singleClickActions: [MouseButtonAction] = [
-        .systemDefault, .copy, .paste, .playPause, .missionControl, .screenshot, .phoneScreenshot
+        .systemDefault, .copy, .paste, .playPause, .missionControl, .screenshot,
+        .phoneScreenshot, .copyLatestPhoneMedia
     ]
     /// Actions offered for a double click.
     static let doubleClickActions: [MouseButtonAction] = singleClickActions + [.quitAndReopen]
@@ -28,6 +30,7 @@ enum MouseButtonAction: String, CaseIterable, Identifiable, Codable {
         case .missionControl: return "Mission Control"
         case .screenshot: return "Take Screenshot"
         case .phoneScreenshot: return "Phone screenshot"
+        case .copyLatestPhoneMedia: return "Copy phone's latest media"
         case .quitAndReopen: return "Quit and Reopen"
         }
     }

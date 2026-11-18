@@ -451,6 +451,8 @@ final class AppBootstrapper: ObservableObject {
             ensureFeatureExists(TextExpanderFeature())
             ensureFeatureExists(OpenLogiFeature { [weak self] in
                 (self?.liveFeatures["screen-capture"] as? ScreenCaptureFeature)?.captureSelection()
+            } onCopyLatestPhoneMedia: { [weak self] in
+                self?.phoneIntegrationController().copyLatestMedia()
             })
             ensureFeatureExists(WindowShortcutsFeature())
             ensureFeatureExists(DockQuitButtonFeature())
