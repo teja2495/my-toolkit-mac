@@ -30,9 +30,14 @@ final class CaptureKeyablePanel: NSPanel {
     }
 }
 
-/// The centered popup shown after a screenshot or recording: thumbnail plus follow-up actions.
+/// The popup shown after a screenshot or recording: thumbnail plus follow-up actions.
 @MainActor
 final class CaptureResultPanelController: NSObject, NSWindowDelegate {
+    enum Placement {
+        case center
+        case bottomRight
+    }
+
     private static let panelWidth: CGFloat = 280
     private static let autoCloseDelay: TimeInterval = 5
 
@@ -63,11 +68,12 @@ final class CaptureResultPanelController: NSObject, NSWindowDelegate {
         panel.onCancel = { [weak self] in self?.close() }
     }
 
-    /// Shows the popup centered on the screen that contains `point`.
+    /// Shows the popup on the screen that contains `point`.
     func show(
         thumbnail: NSImage?,
         caption: String,
         onScreenAt point: CGPoint,
+        placement: Placement = .center,
         actions: [CaptureResultAction]
     ) {
         let view = CaptureResultView(
@@ -83,7 +89,7 @@ final class CaptureResultPanelController: NSObject, NSWindowDelegate {
         let size = hostingView.fittingSize
         hostingView.frame.size = size
         panel.contentView = hostingView
-        panel.setFrame(centeredFrame(for: size, onScreenAt: point), display: true)
+        panel.setFrame(frame(for: size, onScreenAt: point, placement: placement), display: true)
 
         panel.orderFrontRegardless()
         panel.makeKey()
@@ -159,13 +165,23 @@ final class CaptureResultPanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Placement
 
-    private func centeredFrame(for size: CGSize, onScreenAt point: CGPoint) -> CGRect {
+    private func frame(for size: CGSize, onScreenAt point: CGPoint, placement: Placement) -> CGRect {
         let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) ?? NSScreen.main
-        let bounds = screen?.visibleFrame ?? CGRect(origin: .zero, size: size)
-        let origin = CGPoint(
-            x: (bounds.midX - size.width / 2).rounded(),
-            y: (bounds.midY - size.height / 2).rounded()
-        )
+        guard let bounds = screen?.visibleFrame else { return CGRect(origin: .zero, size: size) }
+        let origin: CGPoint
+        switch placement {
+        case .center:
+            origin = CGPoint(
+                x: (bounds.midX - size.width / 2).rounded(),
+                y: (bounds.midY - size.height / 2).rounded()
+            )
+        case .bottomRight:
+            let inset: CGFloat = 16
+            origin = CGPoint(
+                x: max(bounds.minX, bounds.maxX - size.width - inset),
+                y: bounds.minY + inset
+            )
+        }
         return CGRect(origin: origin, size: size)
     }
 

@@ -449,7 +449,9 @@ final class AppBootstrapper: ObservableObject {
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())
-            ensureFeatureExists(OpenLogiFeature())
+            ensureFeatureExists(OpenLogiFeature { [weak self] in
+                (self?.liveFeatures["screen-capture"] as? ScreenCaptureFeature)?.captureSelection()
+            })
             ensureFeatureExists(WindowShortcutsFeature())
             ensureFeatureExists(DockQuitButtonFeature())
         } else {

@@ -100,8 +100,8 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
 
     // MARK: - Screenshot
 
-    private func captureSelection() {
-        guard !isCapturingScreenshot else { return }
+    func captureSelection() {
+        guard isStarted, !isCapturingScreenshot else { return }
         resultPanel.close()
         recordingToolbar.close()
         CaptureFiles.removeStaleCaptures()
@@ -192,6 +192,7 @@ final class ScreenCaptureFeature: NSObject, AppFeature {
             thumbnail: image,
             caption: "Copied to clipboard",
             onScreenAt: NSEvent.mouseLocation,
+            placement: .bottomRight,
             actions: actions
         )
     }

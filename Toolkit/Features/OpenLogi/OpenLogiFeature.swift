@@ -9,6 +9,12 @@ import Foundation
 final class OpenLogiFeature: AppFeature {
     let id = "openlogi"
 
+    private let onScreenshot: () -> Void
+
+    init(onScreenshot: @escaping () -> Void) {
+        self.onScreenshot = onScreenshot
+    }
+
     var buttonActions: [OpenLogiButton: MouseButtonAction] = [:] {
         didSet { updateTapState() }
     }
@@ -158,7 +164,7 @@ final class OpenLogiFeature: AppFeature {
 
         if let pending = pendingSingleClicks.removeValue(forKey: button) {
             pending.cancel()
-            Self.perform(doubleAction)
+            perform(doubleAction)
             return
         }
 
@@ -180,7 +186,7 @@ final class OpenLogiFeature: AppFeature {
                 Self.replayClick(buttonNumber: buttonNumber)
             }
         } else {
-            Self.perform(singleAction)
+            perform(singleAction)
         }
     }
 
@@ -206,22 +212,24 @@ final class OpenLogiFeature: AppFeature {
         }
     }
 
-    private static func perform(_ action: MouseButtonAction) {
+    private func perform(_ action: MouseButtonAction) {
         switch action {
         case .systemDefault:
             break
         case .copy:
-            sendKey(CGKeyCode(kVK_ANSI_C), flags: .maskCommand)
+            Self.sendKey(CGKeyCode(kVK_ANSI_C), flags: .maskCommand)
         case .paste:
-            sendKey(CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
+            Self.sendKey(CGKeyCode(kVK_ANSI_V), flags: .maskCommand)
         case .playPause:
-            sendMediaKey(NX_KEYTYPE_PLAY)
+            Self.sendMediaKey(NX_KEYTYPE_PLAY)
         case .missionControl:
-            sendDockNotification("com.apple.expose.awake") {
-                sendKey(CGKeyCode(kVK_UpArrow), flags: .maskControl)
+            Self.sendDockNotification("com.apple.expose.awake") {
+                Self.sendKey(CGKeyCode(kVK_UpArrow), flags: .maskControl)
             }
+        case .screenshot:
+            onScreenshot()
         case .quitAndReopen:
-            quitAndReopenFrontmostApp()
+            Self.quitAndReopenFrontmostApp()
         }
     }
 
