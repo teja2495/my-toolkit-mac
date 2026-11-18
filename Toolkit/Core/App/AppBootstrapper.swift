@@ -70,7 +70,7 @@ final class AppBootstrapper: ObservableObject {
         FeatureDescriptor(
             id: "pure-paste",
             title: "Pure Paste",
-            summary: "Strips fonts, sizes, and colors from anything you copy, keeping line breaks and spacing; bullet points become hyphens. ⌥⌘C copies with formatting kept.",
+            summary: "Strips fonts, sizes, and colors from anything you copy, keeping line breaks and spacing; bullet points become hyphens. ⌥⌘C, or tapping ⌥ up to 2 seconds before copying, keeps formatting.",
             requiresAccessibilityAccess: false,
             isEnabled: true,
             systemImage: "doc.plaintext"

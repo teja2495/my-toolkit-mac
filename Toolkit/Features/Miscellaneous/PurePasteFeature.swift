@@ -5,7 +5,8 @@ import Foundation
 /// Watches the general pasteboard and, whenever a copy carries rich text (RTF, HTML, web archives),
 /// replaces it with the plain-text version only. Fonts, sizes, and colors are dropped; the text itself,
 /// including line breaks, spacing, tabs, and hyphen/bullet characters, is kept as-is, so it pastes in the
-/// destination's own style. ⌥⌘C copies with all formatting kept.
+/// destination's own style. ⌥⌘C copies with all formatting kept, and so does any copy made within
+/// 2 seconds of pressing ⌥ on its own.
 @MainActor
 final class PurePasteFeature: AppFeature {
     let id = "pure-paste"
@@ -15,6 +16,11 @@ final class PurePasteFeature: AppFeature {
     private var keepFormattingHotKey: HotKey?
     /// Set by ⌥⌘C: the next clipboard change before this time is left untouched.
     private var keepFormattingUntil: Date?
+    /// When ⌥ was last pressed on its own; a copy shortly after keeps its formatting.
+    private var lastOptionPress: Date?
+    private var globalFlagsMonitor: Any?
+    private var localFlagsMonitor: Any?
+    private static let optionKeepWindow: TimeInterval = 2
 
     /// Pasteboard types that carry styling information.
     private static let richTypes: Set<NSPasteboard.PasteboardType> = [
@@ -60,6 +66,15 @@ final class PurePasteFeature: AppFeature {
             },
             onKeyUp: {}
         )
+
+        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            let flags = event.modifierFlags
+            MainActor.assumeIsolated { self?.handleFlagsChanged(flags) }
+        }
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event.modifierFlags)
+            return event
+        }
     }
 
     func stop() {
@@ -67,6 +82,19 @@ final class PurePasteFeature: AppFeature {
         pollTimer = nil
         keepFormattingHotKey = nil
         keepFormattingUntil = nil
+        lastOptionPress = nil
+        if let globalFlagsMonitor { NSEvent.removeMonitor(globalFlagsMonitor) }
+        if let localFlagsMonitor { NSEvent.removeMonitor(localFlagsMonitor) }
+        globalFlagsMonitor = nil
+        localFlagsMonitor = nil
+    }
+
+    /// Records ⌥ going down with no other modifiers held (⌘ may be added afterwards for the copy itself).
+    private func handleFlagsChanged(_ flags: NSEvent.ModifierFlags) {
+        let relevant = flags.intersection([.command, .option, .control, .shift, .function])
+        if relevant == .option {
+            lastOptionPress = Date()
+        }
     }
 
     /// ⌥⌘C: sends a normal ⌘C to the frontmost app and leaves the resulting copy formatted.
@@ -95,6 +123,12 @@ final class PurePasteFeature: AppFeature {
             if Date() < keepFormattingUntil { return }
         }
 
+        if let lastOptionPress {
+            self.lastOptionPress = nil
+            // Allow for the poll interval so a copy right at the 2s mark still counts.
+            if Date().timeIntervalSince(lastOptionPress) <= Self.optionKeepWindow + 0.25 { return }
+        }
+
         let types = Set(pasteboard.types ?? [])
         guard types.isDisjoint(with: Self.ignoredTypes),
               !types.isDisjoint(with: Self.richTypes),
@@ -102,7 +136,9 @@ final class PurePasteFeature: AppFeature {
               !plainText.isEmpty
         else { return }
 
-        let text = Self.listAwareText(from: pasteboard, types: types, fallback: plainText)
+        let text = Self.collapsingBlankLines(
+            in: Self.listAwareText(from: pasteboard, types: types, fallback: plainText)
+        )
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -192,7 +228,16 @@ final class PurePasteFeature: AppFeature {
                 ? attributed.attribute(.paragraphStyle, at: paragraphRange.location, effectiveRange: nil) as? NSParagraphStyle
                 : nil
             guard let lists = style?.textLists, let list = lists.last, !line.isEmpty else {
+                // Rich text shows paragraph gaps as spacing rather than empty lines; keep them as one.
+                let previousIsBlank = lines.last.map { $0.trimmingCharacters(in: .whitespaces) == "\n" } ?? true
+                if !line.isEmpty, (style?.paragraphSpacingBefore ?? 0) > 0, !previousIsBlank,
+                   lines.last?.hasSuffix("\n") == true {
+                    lines.append("\n")
+                }
                 lines.append(line + separator)
+                if !line.isEmpty, (style?.paragraphSpacing ?? 0) > 0, !separator.isEmpty {
+                    lines.append("\n")
+                }
                 continue
             }
 
@@ -214,6 +259,18 @@ final class PurePasteFeature: AppFeature {
         }
 
         return foundList ? lines.joined() : nil
+    }
+
+    /// Keeps empty lines, but turns any run of two or more in a row into a single empty line.
+    private static let blankLineRunPattern = try! NSRegularExpression(pattern: "\\n(?:[\\t \\u00A0]*\\r?\\n){2,}")
+
+    private static func collapsingBlankLines(in text: String) -> String {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        return blankLineRunPattern.stringByReplacingMatches(
+            in: normalized,
+            range: NSRange(location: 0, length: (normalized as NSString).length),
+            withTemplate: "\n\n"
+        )
     }
 
     /// For copies without list structure, still turn literal bullet characters at line starts into hyphens.
