@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct PhoneIntegrationSettingsView: View {
     @ObservedObject var bootstrapper: AppBootstrapper
     @ObservedObject private var controller: PhoneBridgeController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var categoryTabNamespace
     @State private var isDeviceDrawerExpanded = true
     @State private var lastAutoCollapseConnectionState: Bool?
@@ -71,9 +72,6 @@ struct PhoneIntegrationSettingsView: View {
         .onAppear {
             installDragResetMonitorsIfNeeded()
             syncDeviceDrawerExpansion(forceInitial: true)
-            controller.refreshConnectionData()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             controller.refreshConnectionData()
         }
         .onChange(of: isCurrentlyConnected) {
@@ -251,7 +249,7 @@ struct PhoneIntegrationSettingsView: View {
 
             HStack(spacing: 8) {
                 Button {
-                    controller.refreshConnectionData()
+                    controller.refreshConnectionData(restartDiscovery: true)
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
@@ -422,15 +420,25 @@ struct PhoneIntegrationSettingsView: View {
             Button {
                 controller.refreshFiles()
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 28, height: 28)
-                    .contentShape(Circle())
+                Group {
+                    if controller.isLoadingFiles {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: Circle())
-            .help("Refresh files")
+            .disabled(controller.isLoadingFiles)
+            .help(controller.isLoadingFiles ? "Refreshing files…" : "Refresh files")
             .accessibilityLabel("Refresh files")
+            .accessibilityValue(controller.isLoadingFiles ? "Refreshing" : "")
         }
     }
 
@@ -468,7 +476,8 @@ struct PhoneIntegrationSettingsView: View {
 
     @ViewBuilder
     private var libraryContent: some View {
-        if controller.isLoadingFiles {
+        let files = controller.fileItems
+        if files.isEmpty && controller.isLoadingFiles {
             VStack(spacing: 10) {
                 ProgressView()
                     .controlSize(.small)
@@ -478,11 +487,11 @@ struct PhoneIntegrationSettingsView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 80)
-        } else if filteredFiles.isEmpty {
+        } else if files.isEmpty {
             libraryEmptyState
         } else {
             LazyVStack(alignment: .leading, spacing: 22) {
-                ForEach(fileGroups) { group in
+                ForEach(fileGroups(for: files)) { group in
                     VStack(alignment: .leading, spacing: 10) {
                         Text(group.title)
                             .font(.system(size: 15, weight: .semibold))
@@ -493,14 +502,18 @@ struct PhoneIntegrationSettingsView: View {
                             spacing: controller.selectedCategory == .photosVideos ? 6 : 12
                         ) {
                             ForEach(group.files) { file in
-                                if controller.selectedCategory == .photosVideos {
-                                    photoGridItem(for: file)
-                                } else {
-                                    otherGridItem(for: file)
+                                Group {
+                                    if controller.selectedCategory == .photosVideos {
+                                        photoGridItem(for: file)
+                                    } else {
+                                        otherGridItem(for: file)
+                                    }
                                 }
+                                .transition(.asymmetric(insertion: .opacity, removal: .identity))
                             }
                         }
                     }
+                    .transition(.asymmetric(insertion: .opacity, removal: .identity))
                 }
 
                 if isCurrentlyConnected {
@@ -512,6 +525,8 @@ struct PhoneIntegrationSettingsView: View {
                 }
             }
             .padding(.top, 10)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: files.map(\.id))
+            .id(controller.selectedCategory)
         }
     }
 
@@ -572,18 +587,14 @@ struct PhoneIntegrationSettingsView: View {
         .transition(.opacity)
     }
 
-    private var filteredFiles: [PhoneFileItem] {
-        controller.fileItems.sorted { $0.modifiedDate > $1.modifiedDate }
-    }
-
     /// Buckets files into Today, Yesterday, and Older (newest first within each).
-    private var fileGroups: [PhoneFileDayGroup] {
+    private func fileGroups(for files: [PhoneFileItem]) -> [PhoneFileDayGroup] {
         let calendar = Calendar.current
         var today: [PhoneFileItem] = []
         var yesterday: [PhoneFileItem] = []
         var older: [PhoneFileItem] = []
 
-        for file in filteredFiles {
+        for file in files {
             if calendar.isDateInToday(file.modifiedDate) {
                 today.append(file)
             } else if calendar.isDateInYesterday(file.modifiedDate) {

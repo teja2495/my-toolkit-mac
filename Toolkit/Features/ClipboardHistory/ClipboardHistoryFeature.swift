@@ -8,7 +8,7 @@ final class ClipboardHistoryFeature: AppFeature {
 
     let store = ClipboardHistoryStore()
     private lazy var panelController = ClipboardHistoryPanelController(store: store) { [weak self] items in
-        self?.writeToPasteboard(items)
+        self?.writeToPasteboard(items) ?? false
     }
 
     private var pollTimer: Timer?
@@ -101,33 +101,37 @@ final class ClipboardHistoryFeature: AppFeature {
     }
 
     /// Multiple items are joined as text separated by a blank line; images are skipped in that case.
-    private func writeToPasteboard(_ items: [ClipboardHistoryItem]) {
+    private func writeToPasteboard(_ items: [ClipboardHistoryItem]) -> Bool {
+        guard let first = items.first else { return false }
         let textItems = items.filter { $0.kind == .text }
         guard items.count > 1, !textItems.isEmpty else {
-            if let item = items.first { writeToPasteboard(item) }
-            return
+            return writeToPasteboard(first)
         }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(textItems.map { $0.text ?? "" }.joined(separator: "\n\n"), forType: .string)
+        let copied = pasteboard.setString(textItems.map { $0.text ?? "" }.joined(separator: "\n\n"), forType: .string)
         lastChangeCount = pasteboard.changeCount
+        return copied
     }
 
-    private func writeToPasteboard(_ item: ClipboardHistoryItem) {
+    private func writeToPasteboard(_ item: ClipboardHistoryItem) -> Bool {
         let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+        let copied: Bool
         switch item.kind {
         case .text:
-            pasteboard.setString(item.text ?? "", forType: .string)
+            pasteboard.clearContents()
+            copied = pasteboard.setString(item.text ?? "", forType: .string)
         case .image:
-            guard let url = store.imageURL(for: item), let data = try? Data(contentsOf: url) else { return }
-            pasteboard.setData(data, forType: .png)
+            guard let url = store.imageURL(for: item), let data = try? Data(contentsOf: url) else { return false }
+            pasteboard.clearContents()
+            copied = pasteboard.setData(data, forType: .png)
             if let tiff = NSImage(data: data)?.tiffRepresentation {
                 pasteboard.setData(tiff, forType: .tiff)
             }
         }
         lastChangeCount = pasteboard.changeCount
-        store.promote(id: item.id)
+        if copied { store.promote(id: item.id) }
+        return copied
     }
 
     private static func pngData(from image: NSImage) -> (Data, CGSize)? {

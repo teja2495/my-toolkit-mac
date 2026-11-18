@@ -28,6 +28,14 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .containerBackground(Color(nsColor: .windowBackgroundColor), for: .window)
+        .background(ToolkitMainWindowObserver {
+            guard selection == .feature("phone-integration") else { return }
+            let controller = bootstrapper.phoneIntegrationController()
+            controller.refreshConnectionData()
+            if case .connected = controller.connectionState {
+                controller.refreshFiles()
+            }
+        })
     }
 }
 

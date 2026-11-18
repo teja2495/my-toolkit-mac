@@ -11,18 +11,18 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     private let panel: NSPanel
     private let store: ClipboardHistoryStore
-    private let onCopy: ([ClipboardHistoryItem]) -> Void
+    private let onCopy: ([ClipboardHistoryItem]) -> Bool
     private var hostingController: NSHostingController<ClipboardHistoryView>?
-    private var previousApp: NSRunningApplication?
+    private var pasteTarget: NSRunningApplication?
     private var keyMonitor: Any?
     private let viewModel = ClipboardHistoryViewModel()
 
-    init(store: ClipboardHistoryStore, onCopy: @escaping ([ClipboardHistoryItem]) -> Void) {
+    init(store: ClipboardHistoryStore, onCopy: @escaping ([ClipboardHistoryItem]) -> Bool) {
         self.store = store
         self.onCopy = onCopy
         panel = NSPanel(
             contentRect: CGRect(origin: .zero, size: Self.defaultPanelSize),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: true
         )
@@ -46,14 +46,19 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         if panel.isVisible {
             close()
         } else {
-            show()
+            show(minimizingMainWindow: true)
         }
     }
 
-    func show() {
+    func show(minimizingMainWindow: Bool = false) {
         let frontmost = NSWorkspace.shared.frontmostApplication
-        if frontmost?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            previousApp = frontmost
+        pasteTarget = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : frontmost
+
+        if minimizingMainWindow {
+            let mainWindows = NSApp.windows.filter { $0.identifier == ToolkitApp.mainWindowIdentifier }
+            for window in mainWindows where window.isVisible && !window.isMiniaturized {
+                window.miniaturize(nil)
+            }
         }
 
         if hostingController == nil {
@@ -77,7 +82,6 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         viewModel.renamingID = nil
 
         panel.setFrame(centeredFrame(), display: true)
-        NSApp.activate(ignoringOtherApps: true)
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         installKeyMonitor()
@@ -85,6 +89,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     func close() {
         removeKeyMonitor()
+        pasteTarget = nil
         panel.orderOut(nil)
     }
 
@@ -109,8 +114,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
         case kVK_UpArrow where modifiers.isEmpty: return .up
         case kVK_DownArrow where modifiers.isEmpty: return .down
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            if modifiers == .command { return .paste }
-            return modifiers.isEmpty ? .copy : nil
+            return modifiers.isEmpty ? .paste : nil
         case kVK_Delete, kVK_ForwardDelete:
             return modifiers.isEmpty ? .delete : nil
         case kVK_Escape: return .clearSelection
@@ -124,23 +128,25 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         removeKeyMonitor()
-        previousApp = nil
+        pasteTarget = nil
     }
 
     private func copyOnly(_ items: [ClipboardHistoryItem]) {
-        onCopy(items)
+        _ = onCopy(items)
         close()
-        previousApp?.activate()
     }
 
-    /// Copies the item and pastes it into the app that was frontmost before the panel opened.
+    /// Copies the selection before letting the previous app handle Paste.
     private func paste(_ items: [ClipboardHistoryItem]) {
-        onCopy(items)
+        let target = pasteTarget
+        let copied = onCopy(items)
+        let changeCount = NSPasteboard.general.changeCount
         close()
-        guard let previousApp else { return }
-        previousApp.activate()
-        guard AXIsProcessTrusted() else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        guard copied, let target, AXIsProcessTrusted() else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard self?.isVisible == false,
+                  NSPasteboard.general.changeCount == changeCount,
+                  NSWorkspace.shared.frontmostApplication == target else { return }
             Self.postCommandV()
         }
     }
@@ -177,7 +183,7 @@ final class ClipboardHistoryPanelController: NSObject, NSWindowDelegate {
 @MainActor
 final class ClipboardHistoryViewModel: ObservableObject {
     enum Key {
-        case up, down, copy, paste, delete, clearSelection, close
+        case up, down, paste, delete, clearSelection, close
     }
 
     @Published var selectedID: ClipboardHistoryItem.ID?

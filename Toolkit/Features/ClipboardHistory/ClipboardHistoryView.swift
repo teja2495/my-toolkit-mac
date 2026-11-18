@@ -82,7 +82,7 @@ struct ClipboardHistoryView: View {
                     Text("\(model.multiSelectedIDs.count) selected")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Self.accent)
-                        .help("Press Return to copy them, separated by a blank line")
+                        .help("Press Return to copy them, separated by a blank line, and paste into the previous app")
                 }
             }
                 .padding(.horizontal, 20)
@@ -212,10 +212,10 @@ struct ClipboardHistoryView: View {
             moveSelection(by: -1)
         case .down:
             moveSelection(by: 1)
-        case .copy, .paste:
+        case .paste:
             let items = itemsToCopy
             guard !items.isEmpty else { return false }
-            key == .paste ? onPaste(items) : onCopy(items)
+            onPaste(items)
         case .delete:
             guard let id = model.selectedID else { return false }
             delete(id: id)

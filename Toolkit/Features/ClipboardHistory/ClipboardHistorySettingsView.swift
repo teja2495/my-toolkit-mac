@@ -34,7 +34,7 @@ struct ClipboardHistorySettingsView: View {
 
                     SettingsRow(
                         "Show now",
-                        description: "Use ↑ ↓ to move, Return to copy, ⌘Return to paste into the previous app, Delete to remove, Esc to close. Right-click an item to pin it. Up to \(ClipboardHistoryStore.maxItems) items are kept; the oldest unpinned item is dropped first. Password manager copies are skipped."
+                        description: "Use ↑ ↓ to move, Return to copy and paste into the previous app, Delete to remove, and Esc to close. Right-click an item to pin it. History keeps up to \(ClipboardHistoryStore.maxItems) items and drops the oldest unpinned item first. Copies from password managers are skipped."
                     ) {
                         Button("Open") {
                             bootstrapper.showClipboardHistory()

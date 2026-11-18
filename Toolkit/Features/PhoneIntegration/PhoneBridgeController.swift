@@ -57,6 +57,7 @@ final class PhoneBridgeController: ObservableObject {
     private let queue = DispatchQueue(label: "com.tk.toolkit.phone-bridge", qos: .userInitiated)
     private let logger = Logger(subsystem: "com.tk.toolkit", category: "PhoneBridge")
     private var browser: NWBrowser?
+    private var connectingConnection: NWConnection?
     private var activePairing: ActivePairing? {
         didSet {
             updateClipboardMonitoringIfNeeded()
@@ -94,25 +95,27 @@ final class PhoneBridgeController: ObservableObject {
             for: .bonjourWithTXTRecord(type: PhoneBridgeProtocol.serviceType, domain: nil),
             using: .tcp
         )
-        browser.stateUpdateHandler = { [weak self] state in
+        browser.stateUpdateHandler = { [weak self, weak browser] state in
             Task { @MainActor in
+                guard let self, let browser, self.browser === browser else { return }
                 switch state {
                 case .ready:
-                    self?.logger.debug("Browser ready")
-                    self?.connectionState = .browsing
+                    self.logger.debug("Browser ready")
                 case .failed(let error):
-                    self?.logger.error("Browser failed: \(error.localizedDescription, privacy: .public)")
-                    self?.connectionState = .error(error.localizedDescription)
-                    self?.transferStatusMessage = error.localizedDescription
+                    self.logger.error("Browser failed: \(error.localizedDescription, privacy: .public)")
+                    self.browser = nil
+                    if self.connectingConnection == nil && self.activePairing == nil {
+                        self.connectionState = .error(error.localizedDescription)
+                        self.transferStatusMessage = error.localizedDescription
+                    }
                 case .cancelled:
-                    self?.logger.debug("Browser cancelled")
-                    self?.connectionState = .idle
+                    self.logger.debug("Browser cancelled")
                 default:
                     break
                 }
             }
         }
-        browser.browseResultsChangedHandler = { [weak self] results, _ in
+        browser.browseResultsChangedHandler = { [weak self, weak browser] results, _ in
             var devicesByID: [String: DiscoveredPhoneDevice] = [:]
             for result in results {
                 guard case let .service(name: name, type: _, domain: _, interface: _) = result.endpoint else {
@@ -140,17 +143,20 @@ final class PhoneBridgeController: ObservableObject {
             }
             let devices = Array(devicesByID.values)
             Task { @MainActor in
-                self?.allDiscoveredDevices = devices.sorted {
+                guard let self, let browser, self.browser === browser else { return }
+                self.allDiscoveredDevices = devices.sorted {
                     $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
                 }
-                self?.reconnectingServiceNames.formIntersection(Set(devices.map(\.name)))
-                self?.logger.debug("Discovered devices count=\(devices.count)")
-                self?.refreshDiscoveredDevices()
-                self?.attemptAutoReconnectIfPossible()
+                self.reconnectingServiceNames.formIntersection(Set(devices.map(\.name)))
+                self.logger.debug("Discovered devices count=\(devices.count)")
+                self.refreshDiscoveredDevices()
+                self.attemptAutoReconnectIfPossible()
             }
         }
         self.browser = browser
-        connectionState = .browsing
+        if connectingConnection == nil && activePairing == nil {
+            connectionState = .browsing
+        }
         browser.start(queue: queue)
     }
 
@@ -160,6 +166,8 @@ final class PhoneBridgeController: ObservableObject {
         stopClipboardMonitoring()
         browser?.cancel()
         browser = nil
+        connectingConnection?.cancel()
+        connectingConnection = nil
         activePairing?.connection.cancel()
         activePairing = nil
         pendingPairing = nil
@@ -194,53 +202,60 @@ final class PhoneBridgeController: ObservableObject {
         }
     }
 
-    func refreshConnectionData() {
+    func refreshConnectionData(restartDiscovery: Bool = false) {
         let now = Date()
         guard now.timeIntervalSince(lastConnectionDataRefreshAt) >= 0.5 else { return }
         lastConnectionDataRefreshAt = now
         trustedDevices = store.trustedDevices()
 
-        if activePairing != nil || pendingPairing != nil {
+        refreshDiscoveredDevices()
+        guard activePairing == nil, connectingConnection == nil else { return }
+        if restartDiscovery {
+            browser?.cancel()
+            browser = nil
+            allDiscoveredDevices = []
+            reconnectingServiceNames = []
             refreshDiscoveredDevices()
-            return
         }
-
-        stop()
         start()
+        attemptAutoReconnectIfPossible()
     }
 
     func pair(with device: DiscoveredPhoneDevice) {
         logger.debug("Pair requested for service=\(device.name, privacy: .public)")
-        activePairing?.connection.cancel()
+        if let activePairing {
+            activePairing.connection.cancel()
+            self.activePairing = nil
+            connectedServiceName = nil
+            let error = PhoneBridgeControllerError.connectionClosed
+            failAllShareTransfers(error)
+            let transfers = activeFileTransfers
+            activeFileTransfers = [:]
+            transfers.values.forEach { $0.completion(.failure(error)) }
+            finishActiveFileRequest()
+            queuedFileCategories = []
+            cachedFileItemsByCategory = [:]
+            fileItems = []
+        }
         pendingPairing = nil
         manuallyDisconnectedServiceName = nil
         connectionState = .pairing
 
+        connectingConnection?.cancel()
         let connection = NWConnection(to: device.endpoint, using: .tcp)
-        connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                Task { @MainActor in
-                    self?.logger.debug("Connection ready for service=\(device.name, privacy: .public)")
-                    self?.sendPairHello(to: connection, device: device)
+        connectingConnection = connection
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            Task { @MainActor in
+                guard let self, let connection, self.connectingConnection === connection else { return }
+                switch state {
+                case .ready:
+                    self.logger.debug("Connection ready for service=\(device.name, privacy: .public)")
+                    self.sendPairHello(to: connection, device: device)
+                case .failed(let error):
+                    self.failConnectionAttempt(connection, serviceName: device.name, error: error)
+                default:
+                    break
                 }
-            case .failed(let error):
-                Task { @MainActor in
-                    self?.logger.error("Connection failed for service=\(device.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                    self?.failAllShareTransfers(error)
-                    self?.activePairing = nil
-                    self?.pendingPairing = nil
-                    self?.connectedServiceName = nil
-                    self?.reconnectingServiceNames.remove(device.name)
-                    self?.refreshDiscoveredDevices()
-                    self?.connectionState = .error(error.localizedDescription)
-                    self?.transferStatusMessage = error.localizedDescription
-                    self?.attemptAutoReconnectIfPossible()
-                }
-            case .cancelled:
-                break
-            default:
-                break
             }
         }
         connection.start(queue: queue)
@@ -255,7 +270,6 @@ final class PhoneBridgeController: ObservableObject {
         pendingPairing = nil
         connectionState = .pairing
         receiveEncryptedMessages(pairing: activePairing)
-        refreshFiles()
     }
 
     func rejectPendingPairing() {
@@ -331,14 +345,9 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     func refreshFiles() {
-        let categories = orderedRefreshCategories()
-        for (index, category) in categories.enumerated() {
-            enqueueFileRequest(
-                for: category,
-                prioritize: index == 0,
-                forceRetry: true
-            )
-        }
+        guard canRequestFiles else { return }
+        queuedFileCategories = orderedRefreshCategories().filter { $0 != activeFileRequestCategory }
+        processQueuedFileRequestsIfPossible()
     }
 
     func requestLocalFileURL(
@@ -423,11 +432,17 @@ final class PhoneBridgeController: ObservableObject {
                 discoveredServiceName: device.name
             )
         } catch {
-            Task { @MainActor in
-                connectionState = .error(error.localizedDescription)
-                transferStatusMessage = error.localizedDescription
-            }
+            failConnectionAttempt(connection, serviceName: device.name, error: error)
         }
+    }
+
+    private func failConnectionAttempt(_ connection: NWConnection, serviceName: String, error: Error) {
+        logger.error("Connection failed for service=\(serviceName, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        connectingConnection = nil
+        connection.cancel()
+        reconnectingServiceNames.remove(serviceName)
+        connectionState = .error(error.localizedDescription)
+        transferStatusMessage = error.localizedDescription
     }
 
     private func receivePairChallenge(
@@ -439,6 +454,7 @@ final class PhoneBridgeController: ObservableObject {
         receiveFrame(connection: connection) { [weak self] result in
             guard let self else { return }
             Task { @MainActor in
+                guard self.connectingConnection === connection else { return }
                 do {
                     let data = try result.get()
                     let json = try Self.jsonObject(from: data)
@@ -470,6 +486,7 @@ final class PhoneBridgeController: ObservableObject {
                         remotePublicKeyBase64: remotePublicKeyBase64,
                         serviceName: discoveredServiceName
                     )
+                    self.connectingConnection = nil
                     self.activePairing = pairing
                     self.connectionState = .pairing
                     let remoteTrustsThisMac = json["trustedPeer"] as? Bool ?? false
@@ -484,7 +501,6 @@ final class PhoneBridgeController: ObservableObject {
                             pairing: pairing
                         )
                         self.receiveEncryptedMessages(pairing: pairing)
-                        self.refreshFiles()
                     } else {
                         self.pendingPairing = PendingPhonePairing(
                             id: pairing.id,
@@ -494,10 +510,7 @@ final class PhoneBridgeController: ObservableObject {
                         )
                     }
                 } catch {
-                    self.reconnectingServiceNames.remove(discoveredServiceName)
-                    connection.cancel()
-                    self.connectionState = .error(error.localizedDescription)
-                    self.transferStatusMessage = error.localizedDescription
+                    self.failConnectionAttempt(connection, serviceName: discoveredServiceName, error: error)
                 }
             }
         }
@@ -507,6 +520,7 @@ final class PhoneBridgeController: ObservableObject {
         receiveFrame(connection: pairing.connection) { [weak self] result in
             guard let self else { return }
             Task { @MainActor in
+                guard self.activePairing?.id == pairing.id else { return }
                 do {
                     let encrypted = try result.get()
                     let decrypted = try self.crypto.decrypt(encrypted, key: pairing.sessionKey)
@@ -534,8 +548,6 @@ final class PhoneBridgeController: ObservableObject {
                         self.refreshFiles()
                         self.processQueuedOutgoingShareFilesIfPossible()
                     } else if messageType == PhoneBridgeProtocol.listFilesResult {
-                        self.fileRequestRetryTask?.cancel()
-                        self.fileRequestRetryTask = nil
                         let count = (json["files"] as? [[String: Any]] ?? []).count
                         self.logger.debug("Received files.list.result from deviceId=\(pairing.deviceId, privacy: .public) count=\(count)")
                         self.handleListFilesResult(json)
@@ -558,15 +570,11 @@ final class PhoneBridgeController: ObservableObject {
                             self.receiveEncryptedMessages(pairing: pairing)
                             return
                         }
-                        self.fileRequestRetryTask?.cancel()
-                        self.fileRequestRetryTask = nil
                         self.logger.error("Received bridge error from deviceId=\(pairing.deviceId, privacy: .public): \((json["message"] as? String) ?? "unknown", privacy: .public)")
-                        self.isLoadingFiles = false
-                        self.activeFileRequestCategory = nil
-                        self.fileItems = []
+                        self.finishActiveFileRequest()
+                        self.processQueuedFileRequestsIfPossible()
                         self.fileBrowserMessage = (json["message"] as? String) ?? "Android reported a file browsing error."
                         self.transferStatusMessage = (json["message"] as? String) ?? "Android reported a bridge error."
-                        self.processQueuedFileRequestsIfPossible()
                     }
                     self.receiveEncryptedMessages(pairing: pairing)
                 } catch {
@@ -763,18 +771,9 @@ final class PhoneBridgeController: ObservableObject {
         return object
     }
 
-    private func requestFilesIfPossible(forceRetry: Bool = false) {
-        let categories = requestedCategories(for: selectedCategory)
-        for (index, category) in categories.enumerated() {
-            enqueueFileRequest(
-                for: category,
-                prioritize: index == 0,
-                forceRetry: forceRetry
-            )
-        }
-    }
-
     private func handleListFilesResult(_ json: [String: Any]) {
+        guard let responseCategory = activeFileRequestCategory,
+              (category(from: json) ?? responseCategory) == responseCategory else { return }
         let files = (json["files"] as? [[String: Any]] ?? []).compactMap { item -> PhoneFileItem? in
             guard
                 let id = item["id"] as? String,
@@ -798,12 +797,10 @@ final class PhoneBridgeController: ObservableObject {
                 thumbnailData: thumbnailData
             )
         }
-        let responseCategory = category(from: json) ?? activeFileRequestCategory ?? selectedCategory
         cachedFileItemsByCategory[responseCategory] = limitedFiles(files, for: responseCategory)
-        refreshVisibleFileItems()
         logger.debug("Rendered file items count=\(files.count) category=\(responseCategory.rawValue, privacy: .public)")
-        activeFileRequestCategory = nil
-        isLoadingFiles = false
+        finishActiveFileRequest()
+        refreshVisibleFileItems()
         processQueuedFileRequestsIfPossible()
     }
 
@@ -860,31 +857,14 @@ final class PhoneBridgeController: ObservableObject {
         }
     }
 
-    private func enqueueFileRequest(
-        for category: PhoneFileCategory,
-        prioritize: Bool = false,
-        forceRetry: Bool = false
-    ) {
-        guard canRequestFiles else { return }
-        if forceRetry {
-            fileRequestRetryTask?.cancel()
-            fileRequestRetryTask = nil
-            cachedFileItemsByCategory[category] = nil
-        }
-        if activeFileRequestCategory == category {
-            sendActiveFileRequest(forceRetry: forceRetry)
-            return
-        }
-        queuedFileCategories.removeAll { $0 == category }
-        if prioritize {
-            queuedFileCategories.insert(category, at: 0)
-        } else {
-            queuedFileCategories.append(category)
-        }
-        processQueuedFileRequestsIfPossible(forceRetry: forceRetry)
+    private func finishActiveFileRequest() {
+        fileRequestRetryTask?.cancel()
+        fileRequestRetryTask = nil
+        activeFileRequestCategory = nil
+        isLoadingFiles = false
     }
 
-    private func processQueuedFileRequestsIfPossible(forceRetry: Bool = false) {
+    private func processQueuedFileRequestsIfPossible() {
         guard canRequestFiles else { return }
         guard activeFileRequestCategory == nil else { return }
         guard !queuedFileCategories.isEmpty else {
@@ -892,58 +872,46 @@ final class PhoneBridgeController: ObservableObject {
             return
         }
         activeFileRequestCategory = queuedFileCategories.removeFirst()
-        sendActiveFileRequest(forceRetry: forceRetry)
+        sendActiveFileRequest()
     }
 
-    private func sendActiveFileRequest(forceRetry: Bool) {
+    private func sendActiveFileRequest() {
         guard let activePairing, let category = activeFileRequestCategory else { return }
-        if forceRetry {
-            fileRequestRetryTask?.cancel()
-            fileRequestRetryTask = nil
-        }
-        let pageSize = Self.maxFilesPerCategory
+        let request: [String: Any] = [
+            "type": PhoneBridgeProtocol.listFiles,
+            "category": category.rawValue,
+            "pageSize": Self.maxFilesPerCategory,
+            "pageToken": 0
+        ]
         isLoadingFiles = true
         if category == selectedCategory {
             fileBrowserMessage = "Loading \(category.title.lowercased()) from \(activePairing.deviceName)..."
         }
         logger.debug("Requesting files category=\(category.rawValue, privacy: .public) from deviceId=\(activePairing.deviceId, privacy: .public)")
-        sendEncrypted(
-            [
-                "type": PhoneBridgeProtocol.listFiles,
-                "category": category.rawValue,
-                "pageSize": pageSize,
-                "pageToken": 0
-            ],
-            pairing: activePairing
-        )
-        guard forceRetry else { return }
+        sendEncrypted(request, pairing: activePairing)
         fileRequestRetryTask = Task { [weak self] in
             for attempt in 1...2 {
                 try? await Task.sleep(for: .seconds(1))
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    guard let self, let retryPairing = self.activePairing else { return }
-                    guard self.canRequestFiles else { return }
-                    guard self.isLoadingFiles else { return }
-                    guard self.activeFileRequestCategory == category else { return }
-                    self.logger.debug("Retrying files.list attempt=\(attempt) category=\(category.rawValue, privacy: .public) deviceId=\(retryPairing.deviceId, privacy: .public)")
-                    self.sendEncrypted(
-                        [
-                            "type": PhoneBridgeProtocol.listFiles,
-                            "category": category.rawValue,
-                            "pageSize": pageSize,
-                            "pageToken": 0
-                        ],
-                        pairing: retryPairing
-                    )
-                }
+                guard !Task.isCancelled, let self,
+                      self.activePairing?.id == activePairing.id else { return }
+                guard self.canRequestFiles else { break }
+                self.logger.debug("Retrying files.list attempt=\(attempt) category=\(category.rawValue, privacy: .public) deviceId=\(activePairing.deviceId, privacy: .public)")
+                self.sendEncrypted(request, pairing: activePairing)
+            }
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, let self, self.activePairing?.id == activePairing.id else { return }
+            self.logger.error("Timed out loading files for category=\(category.rawValue, privacy: .public)")
+            self.finishActiveFileRequest()
+            self.processQueuedFileRequestsIfPossible()
+            if self.fileItems.isEmpty && self.requestedCategories(for: self.selectedCategory).contains(category) {
+                self.fileBrowserMessage = "The phone didn’t respond. Try refreshing the library."
             }
         }
     }
 
     private var canRequestFiles: Bool {
         switch connectionState {
-        case .connected, .pairing:
+        case .connected:
             return activePairing != nil
         default:
             return false
@@ -961,7 +929,9 @@ final class PhoneBridgeController: ObservableObject {
         default:
             visibleFiles = cachedFileItemsByCategory[selectedCategory] ?? []
         }
-        fileItems = visibleFiles
+        if fileItems != visibleFiles {
+            fileItems = visibleFiles
+        }
         if visibleFiles.isEmpty {
             if canRequestFiles && activeFileRequestCategory == nil {
                 if hasCachedFileItems(for: selectedCategory) {
@@ -1319,7 +1289,7 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private func orderedRefreshCategories() -> [PhoneFileCategory] {
-        var orderedCategories: [PhoneFileCategory] = []
+        var orderedCategories = requestedCategories(for: selectedCategory)
         for category in PhoneFileCategory.allCases.flatMap(requestedCategories(for:)) {
             if !orderedCategories.contains(category) {
                 orderedCategories.append(category)
@@ -1597,6 +1567,7 @@ final class PhoneBridgeController: ObservableObject {
 
     private func attemptAutoReconnectIfPossible() {
         guard activePairing == nil else { return }
+        guard connectingConnection == nil else { return }
         guard pendingPairing == nil else { return }
         guard connectedServiceName == nil else { return }
 
