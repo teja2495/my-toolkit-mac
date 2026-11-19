@@ -681,6 +681,8 @@ struct PhoneIntegrationSettingsView: View {
         }
         .onDrag {
             dragItemProvider(for: file)
+        } preview: {
+            fileDragPreview(for: file)
         }
         .contextMenu {
             fileContextMenu(for: file)
@@ -746,6 +748,8 @@ struct PhoneIntegrationSettingsView: View {
         }
         .onDrag {
             dragItemProvider(for: file)
+        } preview: {
+            fileDragPreview(for: file)
         }
         .contextMenu {
             fileContextMenu(for: file)
@@ -816,6 +820,14 @@ struct PhoneIntegrationSettingsView: View {
         Button("Download") {
             downloadFile(file)
         }
+    }
+
+    private func fileDragPreview(for file: PhoneFileItem) -> some View {
+        // Avoid rendering the grid tile and its glass controls into the drag image.
+        Image(nsImage: NSWorkspace.shared.icon(for: contentType(for: file)))
+            .resizable()
+            .scaledToFit()
+            .frame(width: 48, height: 48)
     }
 
     private func dragItemProvider(for file: PhoneFileItem) -> NSItemProvider {
