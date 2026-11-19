@@ -78,6 +78,7 @@ final class PhoneBridgeController: ObservableObject {
     private var activeFileRequestCategory: PhoneFileCategory?
     private var activeFileTransfers: [String: ActiveFileTransfer] = [:]
     private enum LatestMediaCopyState {
+        case awaitingStaleList
         case awaitingList
         case downloading
     }
@@ -367,12 +368,11 @@ final class PhoneBridgeController: ObservableObject {
             failLatestMediaCopy("Connect to your Android phone in Toolkit.")
             return
         }
-        latestMediaCopyState = .awaitingList
-        if activeFileRequestCategory != .photosVideos {
-            queuedFileCategories.removeAll { $0 == .photosVideos }
-            queuedFileCategories.insert(.photosVideos, at: 0)
-            processQueuedFileRequestsIfPossible()
-        }
+        // Always fetch a fresh list first; a request already in flight may predate the newest media.
+        latestMediaCopyState = activeFileRequestCategory == .photosVideos ? .awaitingStaleList : .awaitingList
+        queuedFileCategories.removeAll { $0 == .photosVideos }
+        queuedFileCategories.insert(.photosVideos, at: 0)
+        processQueuedFileRequestsIfPossible()
     }
 
     @discardableResult
@@ -827,10 +827,12 @@ final class PhoneBridgeController: ObservableObject {
         let sortedFiles = limitedFiles(files, for: responseCategory)
         cachedFileItemsByCategory[responseCategory] = sortedFiles
         logger.debug("Rendered file items count=\(files.count) category=\(responseCategory.rawValue, privacy: .public)")
+        let discardedStaleList = responseCategory == .photosVideos && latestMediaCopyState == .awaitingStaleList
         if responseCategory == .photosVideos && latestMediaCopyState == .awaitingList {
             downloadLatestMedia(from: sortedFiles)
         }
         finishActiveFileRequest()
+        if discardedStaleList { latestMediaCopyState = .awaitingList }
         refreshVisibleFileItems()
         processQueuedFileRequestsIfPossible()
     }
