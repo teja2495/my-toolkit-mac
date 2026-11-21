@@ -116,7 +116,7 @@ final class VSCodeGitRepoModel: ObservableObject {
         }
     }
 
-    /// Runs the user's `run` zsh function from the project folder without
+    /// Runs the user's `r` (or `rel`) zsh function from the project folder without
     /// opening a terminal window.
     func runProject(path: String) {
         guard runStates[path] != .running else { return }
@@ -160,11 +160,11 @@ final class VSCodeGitRepoModel: ObservableObject {
 
     private static func runCommand(for path: String) -> String {
         let name = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).lastPathComponent
-        return releaseProjectNames.contains(name) ? "release" : "run"
+        return releaseProjectNames.contains(name) ? "rel" : "r"
     }
 
     /// Reads the folder paths handled by the `project_cmd` case statement in
-    /// ~/.zshrc, so the play button only shows for projects `run`/`release` support.
+    /// ~/.zshrc, so the play button only shows for projects `r`/`rel` support.
     private static func loadRunnablePaths() -> Set<String> {
         let zshrcPath = (NSHomeDirectory() as NSString).appendingPathComponent(".zshrc")
         guard let contents = try? String(contentsOfFile: zshrcPath, encoding: .utf8) else { return [] }
