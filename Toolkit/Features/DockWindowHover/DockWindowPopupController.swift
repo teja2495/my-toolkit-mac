@@ -312,6 +312,9 @@ final class DockWindowPopupController {
                 onCommitAndPush: { [weak self] path in
                     self?.vscodeGitRepos.commitAndPush(path: path)
                 },
+                onCommitAndPushAll: { [weak self] in
+                    self?.vscodeGitRepos.commitAndPushAll()
+                },
                 onRunVSCodeFolder: { [weak self] path in
                     self?.vscodeGitRepos.runProject(path: path)
                 },
@@ -705,6 +708,7 @@ private struct DockWindowPopupView: View {
     let onPinVSCodeFolder: (String) -> Void
     let onUnpinVSCodeFolder: (VSCodeFolderShortcut) -> Void
     let onCommitAndPush: (String) -> Void
+    let onCommitAndPushAll: () -> Void
     let onRunVSCodeFolder: (String) -> Void
     let onFocusSearchField: () -> Void
 
@@ -715,7 +719,8 @@ private struct DockWindowPopupView: View {
                         icon: appIcon,
                         name: appName,
                         showsHideButton: isAppFocused,
-                        onHide: onHide
+                        onHide: onHide,
+                        gitAction: isVSCodeApp ? bulkGitAction() : nil
                     )
 
                     if isVSCodeApp {
@@ -847,6 +852,17 @@ private struct DockWindowPopupView: View {
         return WindowRowGitAction(
             state: state,
             onCommitAndPush: { onCommitAndPush(path) }
+        )
+    }
+
+    private func bulkGitAction() -> WindowRowGitAction? {
+        let paths = vscodeGitRepos.bulkCommitPaths
+        guard !paths.isEmpty else { return nil }
+        let count = paths.count
+        return WindowRowGitAction(
+            state: vscodeGitRepos.bulkCommitState,
+            onCommitAndPush: onCommitAndPushAll,
+            idleHelp: "Commit & push all \(count) repo\(count == 1 ? "" : "s") with changes"
         )
     }
 
@@ -1068,6 +1084,7 @@ private struct AppHeaderRow: View {
     let name: String
     let showsHideButton: Bool
     let onHide: () -> Void
+    var gitAction: WindowRowGitAction? = nil
     private let actionButtonSize = CGSize(width: 34, height: 24)
 
     var body: some View {
@@ -1086,6 +1103,10 @@ private struct AppHeaderRow: View {
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 4)
+
+            if let gitAction {
+                GitCommitPushButton(action: gitAction)
+            }
 
             if showsHideButton {
                 HideActionButton(action: onHide, size: actionButtonSize)
@@ -1219,6 +1240,7 @@ private struct WindowRow: View {
 private struct WindowRowGitAction {
     let state: VSCodeRepoCommitState?
     let onCommitAndPush: () -> Void
+    var idleHelp: String = "Commit & push with Codex"
 }
 
 private struct WindowRowRunAction {
@@ -1312,7 +1334,7 @@ private struct GitCommitPushButton: View {
         case .failed(let message):
             return "Commit & push failed — click to retry.\n\(message)"
         case nil:
-            return "Commit & push with Codex"
+            return action.idleHelp
         }
     }
 }

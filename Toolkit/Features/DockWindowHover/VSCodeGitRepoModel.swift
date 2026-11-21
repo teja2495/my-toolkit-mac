@@ -33,6 +33,31 @@ final class VSCodeGitRepoModel: ObservableObject {
         dirtyPaths.contains(path) || unpushedPaths.contains(path)
     }
 
+    /// Repos with uncommitted or unpushed changes, plus any with a visible commit state.
+    var bulkCommitPaths: [String] {
+        Array(dirtyPaths.union(unpushedPaths).union(commitStates.keys)).sorted()
+    }
+
+    /// Combined state for the "commit & push all" header button.
+    var bulkCommitState: VSCodeRepoCommitState? {
+        let states = bulkCommitPaths.map { commitStates[$0] }
+        if states.contains(.running) { return .running }
+        let failures = bulkCommitPaths.compactMap { path -> String? in
+            guard case .failed(let message) = commitStates[path] else { return nil }
+            return "\(URL(fileURLWithPath: path).lastPathComponent): \(message)"
+        }
+        if !failures.isEmpty { return .failed(failures.joined(separator: "\n\n")) }
+        if !states.isEmpty, states.allSatisfy({ $0 == .succeeded }) { return .succeeded }
+        return nil
+    }
+
+    /// Commits and pushes every repo that has pending changes, in parallel.
+    func commitAndPushAll() {
+        for path in dirtyPaths.union(unpushedPaths) where commitStates[path] != .running {
+            commitAndPush(path: path)
+        }
+    }
+
     func canRun(_ path: String) -> Bool {
         runnablePaths.contains(Self.standardized(path))
     }
