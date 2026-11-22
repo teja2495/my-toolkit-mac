@@ -46,6 +46,8 @@ final class PhoneBridgeController: ObservableObject {
     @Published private(set) var isLoadingFiles: Bool = false
     @Published private(set) var fileBrowserMessage: String = "Pair and connect to an Android phone to browse files."
     @Published private(set) var transferStatusMessage: String = ""
+    /// Name of the paired phone when its files are being read over ADB instead of the network bridge.
+    @Published private(set) var adbDeviceName: String?
     @Published var selectedCategory: PhoneFileCategory = .photosVideos {
         didSet {
             refreshVisibleFileItems()
@@ -93,12 +95,18 @@ final class PhoneBridgeController: ObservableObject {
     private var lastObservedClipboardChangeCount: Int?
     private var lastSyncedClipboardText: String?
     private var lastConnectionDataRefreshAt = Date.distantPast
+    private var adbDevice: PhoneADBDevice?
+    private var adbDeviceDetailsBySerial: [String: PhoneADBDevice] = [:]
+    private var adbMonitorTask: Task<Void, Never>?
+    private var adbListTask: Task<Void, Never>?
+    private var adbThumbnailTask: Task<Void, Never>?
 
     init() {
         trustedDevices = store.trustedDevices()
     }
 
     func start() {
+        startADBMonitoring()
         guard browser == nil else { return }
         isStarted = true
         updateClipboardMonitoringIfNeeded()
@@ -203,6 +211,7 @@ final class PhoneBridgeController: ObservableObject {
         lastObservedClipboardChangeCount = nil
         lastSyncedClipboardText = nil
         cleanupIncomingShareTransfers()
+        stopADBMonitoring()
         connectionState = .idle
     }
 
@@ -354,10 +363,15 @@ final class PhoneBridgeController: ObservableObject {
         transferStatusMessage = ""
         refreshDiscoveredDevices()
         connectionState = browser == nil ? .idle : .browsing
+        restartADBMonitoring()
     }
 
     func refreshFiles() {
         guard canRequestFiles else { return }
+        if let adbDevice {
+            refreshFilesViaADB(adbDevice)
+            return
+        }
         queuedFileCategories = orderedRefreshCategories().filter { $0 != activeFileRequestCategory }
         processQueuedFileRequestsIfPossible()
     }
@@ -366,6 +380,10 @@ final class PhoneBridgeController: ObservableObject {
         guard latestMediaCopyState == nil else { return }
         guard canRequestFiles else {
             failLatestMediaCopy("Connect to your Android phone in Toolkit.")
+            return
+        }
+        if let adbDevice {
+            copyLatestMediaViaADB(adbDevice)
             return
         }
         // Always fetch a fresh list first; a request already in flight may predate the newest media.
@@ -380,6 +398,9 @@ final class PhoneBridgeController: ObservableObject {
         for file: PhoneFileItem,
         completion: @escaping (Result<URL, Error>) -> Void
     ) -> String? {
+        if let adbDevice, let remotePath = file.adbPath {
+            return requestLocalFileURLViaADB(for: file, remotePath: remotePath, device: adbDevice, completion: completion)
+        }
         guard let activePairing else {
             completion(.failure(PhoneBridgeControllerError.noActiveConnection))
             return nil
@@ -572,6 +593,7 @@ final class PhoneBridgeController: ObservableObject {
                         self.transferStatusMessage = ""
                         self.fileBrowserMessage = "Loading files from \(pairing.deviceName)..."
                         self.syncCurrentClipboardIfPossible(force: false)
+                        self.restartADBMonitoring()
                         self.refreshFiles()
                         self.processQueuedOutgoingShareFilesIfPossible()
                     } else if messageType == PhoneBridgeProtocol.listFilesResult {
@@ -799,6 +821,11 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private func handleListFilesResult(_ json: [String: Any]) {
+        guard adbDevice == nil else {
+            // Files are coming from ADB now; drop late bridge responses.
+            finishActiveFileRequest()
+            return
+        }
         guard let responseCategory = activeFileRequestCategory,
               (category(from: json) ?? responseCategory) == responseCategory else { return }
         let files = (json["files"] as? [[String: Any]] ?? []).compactMap { item -> PhoneFileItem? in
@@ -955,6 +982,7 @@ final class PhoneBridgeController: ObservableObject {
 
     private func processQueuedFileRequestsIfPossible() {
         guard canRequestFiles else { return }
+        guard adbDevice == nil else { return }
         guard activeFileRequestCategory == nil else { return }
         guard !queuedFileCategories.isEmpty else {
             refreshVisibleFileItems()
@@ -999,6 +1027,7 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private var canRequestFiles: Bool {
+        if adbDevice != nil { return true }
         switch connectionState {
         case .connected:
             return activePairing != nil
@@ -1425,13 +1454,17 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     private func writeTransferredFileToDisk(file: PhoneFileItem, data: Data) throws -> URL {
+        let fileURL = try makePreviewFileURL(for: file)
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+
+    private func makePreviewFileURL(for file: PhoneFileItem) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ToolkitPhonePreview", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fileURL = directory.appendingPathComponent(file.filename)
-        try data.write(to: fileURL, options: .atomic)
-        return fileURL
+        return directory.appendingPathComponent(sanitizedFilename(file.filename))
     }
 
     private func prepareOutgoingShareFiles(from urls: [URL]) throws -> [OutgoingShareFile] {
@@ -1684,6 +1717,224 @@ final class PhoneBridgeController: ObservableObject {
     ) -> Bool {
         trustedDevices.contains {
             $0.id == deviceId && $0.publicKeyBase64 == remotePublicKeyBase64
+        }
+    }
+
+    // MARK: - ADB
+
+    private static let adbPollInterval: Duration = .seconds(3)
+
+    private func startADBMonitoring() {
+        guard adbMonitorTask == nil else { return }
+        adbMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.checkADBDevices()
+                try? await Task.sleep(for: Self.adbPollInterval)
+            }
+        }
+    }
+
+    private func restartADBMonitoring() {
+        guard adbMonitorTask != nil else { return }
+        adbMonitorTask?.cancel()
+        adbMonitorTask = nil
+        startADBMonitoring()
+    }
+
+    private func stopADBMonitoring() {
+        adbMonitorTask?.cancel()
+        adbMonitorTask = nil
+        adbDeviceDetailsBySerial = [:]
+        setADBDevice(nil)
+    }
+
+    private func checkADBDevices() async {
+        guard PhoneADBClient.isAvailable else {
+            setADBDevice(nil)
+            return
+        }
+        let serials = await Task.detached { PhoneADBClient.connectedSerials() ?? [] }.value
+        guard !Task.isCancelled else { return }
+        adbDeviceDetailsBySerial = adbDeviceDetailsBySerial.filter { serials.contains($0.key) }
+        for serial in serials where adbDeviceDetailsBySerial[serial] == nil {
+            if let details = await Task.detached(operation: { PhoneADBClient.deviceDetails(serial: serial) }).value {
+                adbDeviceDetailsBySerial[serial] = details
+            }
+        }
+        guard !Task.isCancelled else { return }
+        let devices = serials.compactMap { adbDeviceDetailsBySerial[$0] }
+        setADBDevice(matchingADBDevice(in: devices))
+    }
+
+    /// Only uses ADB for the phone Toolkit is paired with: the connected bridge device
+    /// (same IP, or same device name), or a trusted device when the bridge isn't connected.
+    private func matchingADBDevice(in devices: [PhoneADBDevice]) -> PhoneADBDevice? {
+        guard !devices.isEmpty else { return nil }
+        if case .connected = connectionState, let activePairing {
+            if let remoteIP = remoteIPAddress(of: activePairing.connection),
+               let match = devices.first(where: { $0.ipAddresses.contains(remoteIP) }) {
+                return match
+            }
+            return devices.first { $0.name == activePairing.deviceName }
+        }
+        if case .pairing = connectionState { return nil }
+        let trustedNames = Set(trustedDevices.map(\.name))
+        return devices.first { trustedNames.contains($0.name) }
+    }
+
+    private func remoteIPAddress(of connection: NWConnection) -> String? {
+        guard case let .hostPort(host, _)? = connection.currentPath?.remoteEndpoint else { return nil }
+        switch host {
+        case .ipv4(let address):
+            return PhoneADBClient.normalizedIPAddress("\(address)")
+        case .ipv6(let address):
+            return PhoneADBClient.normalizedIPAddress("\(address)")
+        case .name(let name, _):
+            return PhoneADBClient.normalizedIPAddress(name)
+        @unknown default:
+            return nil
+        }
+    }
+
+    private func setADBDevice(_ device: PhoneADBDevice?) {
+        guard device?.serial != adbDevice?.serial else {
+            // Same device; reload if its file list was cleared (e.g. after a bridge disconnect).
+            if device != nil, cachedFileItemsByCategory.isEmpty, adbListTask == nil {
+                refreshFiles()
+            }
+            return
+        }
+        logger.debug("ADB file source changed serial=\(device?.serial ?? "none", privacy: .public)")
+        adbDevice = device
+        adbDeviceName = device?.name
+        adbListTask?.cancel()
+        adbListTask = nil
+        adbThumbnailTask?.cancel()
+        adbThumbnailTask = nil
+        finishActiveFileRequest()
+        queuedFileCategories = []
+        cachedFileItemsByCategory = [:]
+        fileItems = []
+        if canRequestFiles {
+            refreshFiles()
+        } else {
+            refreshVisibleFileItems()
+        }
+    }
+
+    private func refreshFilesViaADB(_ device: PhoneADBDevice) {
+        adbListTask?.cancel()
+        adbThumbnailTask?.cancel()
+        adbThumbnailTask = nil
+        isLoadingFiles = true
+        fileBrowserMessage = "Loading \(selectedCategory.title.lowercased()) from \(device.name) over USB..."
+        let categories = orderedRefreshCategories()
+        let limit = Self.maxFilesPerCategory
+        adbListTask = Task { [weak self] in
+            for category in categories {
+                // Downloads also holds media that the documents tab filters out, so read extra rows.
+                let fetchLimit = category == .documents ? limit * 4 : limit
+                let result = await Task.detached {
+                    Result { try PhoneADBClient.listFiles(serial: device.serial, category: category, limit: fetchLimit) }
+                }.value
+                guard !Task.isCancelled, let self, self.adbDevice?.serial == device.serial else { return }
+                switch result {
+                case .success(let files):
+                    let previousThumbnails = Dictionary(
+                        self.cachedFileItemsByCategory.values.joined().compactMap { item in
+                            item.thumbnailData.map { (item.id, $0) }
+                        },
+                        uniquingKeysWith: { first, _ in first }
+                    )
+                    self.cachedFileItemsByCategory[category] = self.limitedFiles(files, for: category).map {
+                        $0.withThumbnailData(previousThumbnails[$0.id])
+                    }
+                case .failure(let error):
+                    self.logger.error("ADB listing failed category=\(category.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                    self.cachedFileItemsByCategory[category] = self.cachedFileItemsByCategory[category] ?? []
+                    if self.requestedCategories(for: self.selectedCategory).contains(category) {
+                        self.transferStatusMessage = error.localizedDescription
+                    }
+                }
+                self.refreshVisibleFileItems()
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.adbListTask = nil
+            self.isLoadingFiles = false
+            self.refreshVisibleFileItems()
+            self.loadADBThumbnails(device)
+        }
+    }
+
+    private func loadADBThumbnails(_ device: PhoneADBDevice) {
+        adbThumbnailTask?.cancel()
+        let visibleIDs = Set(fileItems.map(\.id))
+        var seen: Set<String> = []
+        let pending = (fileItems + cachedFileItemsByCategory.values.joined())
+            .filter { item in
+                item.thumbnailData == nil &&
+                (item.mimeType.hasPrefix("image/") || item.mimeType.hasPrefix("video/")) &&
+                seen.insert(item.id).inserted
+            }
+            .sorted { visibleIDs.contains($0.id) && !visibleIDs.contains($1.id) }
+        guard !pending.isEmpty else { return }
+        adbThumbnailTask = Task { [weak self] in
+            for file in pending {
+                let data = await Task.detached { PhoneADBClient.thumbnail(serial: device.serial, file: file) }.value
+                guard !Task.isCancelled, let self, self.adbDevice?.serial == device.serial else { return }
+                guard let data else { continue }
+                for (category, items) in self.cachedFileItemsByCategory {
+                    self.cachedFileItemsByCategory[category] = items.map {
+                        $0.id == file.id ? $0.withThumbnailData(data) : $0
+                    }
+                }
+                self.refreshVisibleFileItems()
+            }
+            self?.adbThumbnailTask = nil
+        }
+    }
+
+    private func requestLocalFileURLViaADB(
+        for file: PhoneFileItem,
+        remotePath: String,
+        device: PhoneADBDevice,
+        completion: @escaping (Result<URL, Error>) -> Void
+    ) -> String? {
+        let destination: URL
+        do {
+            destination = try makePreviewFileURL(for: file)
+        } catch {
+            completion(.failure(error))
+            return nil
+        }
+        let requestID = UUID().uuidString
+        activeFileTransfers[requestID] = ActiveFileTransfer(file: file, completion: completion)
+        Task { [weak self] in
+            let result = await Task.detached {
+                Result { () -> URL in
+                    try PhoneADBClient.pull(serial: device.serial, remotePath: remotePath, to: destination)
+                    return destination
+                }
+            }.value
+            self?.finishFileTransfer(requestID: requestID, result: result)
+        }
+        return requestID
+    }
+
+    private func copyLatestMediaViaADB(_ device: PhoneADBDevice) {
+        latestMediaCopyState = .awaitingList
+        Task { [weak self] in
+            let result = await Task.detached {
+                Result { try PhoneADBClient.listFiles(serial: device.serial, category: .photosVideos, limit: 5) }
+            }.value
+            guard let self, self.latestMediaCopyState == .awaitingList else { return }
+            switch result {
+            case .success(let files):
+                self.downloadLatestMedia(from: files.sorted { $0.modifiedDate > $1.modifiedDate })
+            case .failure(let error):
+                self.failLatestMediaCopy(error.localizedDescription)
+            }
         }
     }
 }

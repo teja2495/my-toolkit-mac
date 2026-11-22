@@ -61,7 +61,7 @@ enum PhoneConnectionState: Equatable {
     }
 }
 
-enum PhoneFileCategory: String, CaseIterable, Identifiable {
+nonisolated enum PhoneFileCategory: String, CaseIterable, Identifiable, Sendable {
     case photosVideos = "photos_videos"
     case documents
     case music
@@ -83,7 +83,7 @@ enum PhoneFileCategory: String, CaseIterable, Identifiable {
     }
 }
 
-struct PhoneFileItem: Identifiable, Equatable {
+nonisolated struct PhoneFileItem: Identifiable, Equatable, Sendable {
     let id: String
     let filename: String
     let documentURI: String
@@ -92,6 +92,22 @@ struct PhoneFileItem: Identifiable, Equatable {
     let mimeType: String
     let isDirectory: Bool
     let thumbnailData: Data?
+    /// Absolute path on the phone, set when the item was listed over ADB.
+    var adbPath: String? = nil
+
+    func withThumbnailData(_ data: Data?) -> PhoneFileItem {
+        PhoneFileItem(
+            id: id,
+            filename: filename,
+            documentURI: documentURI,
+            size: size,
+            modifiedDate: modifiedDate,
+            mimeType: mimeType,
+            isDirectory: isDirectory,
+            thumbnailData: data,
+            adbPath: adbPath
+        )
+    }
 }
 
 enum MacSharedFileCategory: String, CaseIterable {

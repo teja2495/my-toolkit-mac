@@ -104,7 +104,7 @@ struct PhoneIntegrationSettingsView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 14) {
-                PhoneDeviceGlyph(isConnected: isCurrentlyConnected, isError: isConnectionError)
+                PhoneDeviceGlyph(isConnected: isBrowsingAvailable, isError: isConnectionError && !isBrowsingAvailable)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headerTitle)
@@ -163,7 +163,7 @@ struct PhoneIntegrationSettingsView: View {
         }
         .background {
             shape.fill(Color.settingsSurface)
-            if isCurrentlyConnected {
+            if isBrowsingAvailable {
                 shape.fill(
                     LinearGradient(
                         colors: [Color.green.opacity(0.13), Color.green.opacity(0)],
@@ -175,7 +175,7 @@ struct PhoneIntegrationSettingsView: View {
         }
         .clipShape(shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
-        .animation(.easeInOut(duration: 0.3), value: isCurrentlyConnected)
+        .animation(.easeInOut(duration: 0.3), value: isBrowsingAvailable)
     }
 
     private var deviceDrawer: some View {
@@ -353,6 +353,11 @@ struct PhoneIntegrationSettingsView: View {
         return false
     }
 
+    /// True when files can be browsed, over the network bridge or over ADB.
+    private var isBrowsingAvailable: Bool {
+        isCurrentlyConnected || controller.adbDeviceName != nil
+    }
+
     private var isConnectionError: Bool {
         if case .error = controller.connectionState {
             return true
@@ -361,6 +366,9 @@ struct PhoneIntegrationSettingsView: View {
     }
 
     private var headerTitle: String {
+        if !isCurrentlyConnected, let adbDeviceName = controller.adbDeviceName {
+            return adbDeviceName
+        }
         switch controller.connectionState {
         case .connected(let name):
             return name
@@ -374,9 +382,14 @@ struct PhoneIntegrationSettingsView: View {
     }
 
     private var headerSubtitle: String {
+        if !isCurrentlyConnected, controller.adbDeviceName != nil {
+            return footerStatusMessage ?? "Connected over USB (ADB)"
+        }
         switch controller.connectionState {
         case .connected:
-            return footerStatusMessage ?? "Connected on your local network"
+            return footerStatusMessage ?? (controller.adbDeviceName != nil
+                ? "Connected on your local network · Files over ADB"
+                : "Connected on your local network")
         case .error(let message):
             return message
         case .pairing:
@@ -532,14 +545,14 @@ struct PhoneIntegrationSettingsView: View {
 
     private var libraryEmptyState: some View {
         VStack(spacing: 12) {
-            Image(systemName: isCurrentlyConnected ? "photo.on.rectangle.angled" : "iphone.gen3.slash")
+            Image(systemName: isBrowsingAvailable ? "photo.on.rectangle.angled" : "iphone.gen3.slash")
                 .font(.system(size: 26, weight: .regular))
                 .foregroundStyle(.secondary)
                 .frame(width: 64, height: 64)
                 .background(Circle().fill(Color.primary.opacity(0.06)))
 
             VStack(spacing: 4) {
-                Text(isCurrentlyConnected ? "Nothing here yet" : "Connect your phone to browse files")
+                Text(isBrowsingAvailable ? "Nothing here yet" : "Connect your phone to browse files")
                     .font(.system(size: 14, weight: .semibold))
                 Text(controller.fileBrowserMessage.isEmpty ? "No files found." : controller.fileBrowserMessage)
                     .font(.system(size: 12))
@@ -548,7 +561,7 @@ struct PhoneIntegrationSettingsView: View {
                     .frame(maxWidth: 340)
             }
 
-            if !isCurrentlyConnected && !isDeviceDrawerExpanded {
+            if !isBrowsingAvailable && !isDeviceDrawerExpanded {
                 Button("Show devices") {
                     withAnimation(.snappy(duration: 0.22)) {
                         isDeviceDrawerExpanded = true

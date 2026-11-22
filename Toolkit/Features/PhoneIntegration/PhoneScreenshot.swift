@@ -59,7 +59,7 @@ enum PhoneScreenshot {
         return (png, tiff)
     }
 
-    private static func adbExecutable() -> String? {
+    nonisolated static func adbExecutable() -> String? {
         let environment = ProcessInfo.processInfo.environment
         let sdkPaths = [environment["ANDROID_HOME"], environment["ANDROID_SDK_ROOT"]]
             .compactMap { $0 }

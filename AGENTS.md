@@ -20,6 +20,7 @@
   - stable `id`
   - `start()`
   - `stop()`
+  - 
 - Keep feature-specific models/controllers in that same feature folder.
 
 ## Settings + Wiring Checklist
