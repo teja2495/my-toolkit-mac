@@ -78,13 +78,16 @@ final class PhoneBridgeController: ObservableObject {
     private var cachedFileItemsByCategory: [PhoneFileCategory: [PhoneFileItem]] = [:]
     private var queuedFileCategories: [PhoneFileCategory] = []
     private var activeFileRequestCategory: PhoneFileCategory?
+    private var activeFileRequestID: String?
     private var activeFileTransfers: [String: ActiveFileTransfer] = [:]
     private enum LatestMediaCopyState {
+        case preparing
         case awaitingStaleList
         case awaitingList
         case downloading
     }
     private var latestMediaCopyState: LatestMediaCopyState?
+    private var latestMediaCopyStartedAt = Date.distantPast
     private var latestMediaDownloadTimeout: Task<Void, Never>?
     private var queuedOutgoingShareFiles: [OutgoingShareFile] = []
     private var activeOutgoingShareRequestIDs: Set<String> = []
@@ -377,7 +380,25 @@ final class PhoneBridgeController: ObservableObject {
     }
 
     func copyLatestMedia() {
-        guard latestMediaCopyState == nil else { return }
+        if let state = latestMediaCopyState {
+            // A list request the phone never answered would otherwise block every later copy.
+            guard state != .downloading, Date().timeIntervalSince(latestMediaCopyStartedAt) > 15 else { return }
+        }
+        latestMediaCopyStartedAt = Date()
+        latestMediaCopyState = .preparing
+        // Same refresh as opening the Toolkit window: restart discovery/reconnect if idle.
+        refreshConnectionData()
+        Task { [weak self] in
+            guard let self else { return }
+            // Pick up a USB phone plugged in since the last ADB poll before choosing a source.
+            if self.adbDevice == nil { await self.checkADBDevices() }
+            guard self.latestMediaCopyState == .preparing || self.latestMediaCopyState == nil else { return }
+            self.latestMediaCopyState = nil
+            self.beginLatestMediaCopy()
+        }
+    }
+
+    private func beginLatestMediaCopy() {
         guard canRequestFiles else {
             failLatestMediaCopy("Connect to your Android phone in Toolkit.")
             return
@@ -828,6 +849,8 @@ final class PhoneBridgeController: ObservableObject {
         }
         guard let responseCategory = activeFileRequestCategory,
               (category(from: json) ?? responseCategory) == responseCategory else { return }
+        // Late replies to an earlier request (or its retries) carry an older listing; drop them.
+        if let responseID = json["requestId"] as? String, responseID != activeFileRequestID { return }
         let files = (json["files"] as? [[String: Any]] ?? []).compactMap { item -> PhoneFileItem? in
             guard
                 let id = item["id"] as? String,
@@ -994,8 +1017,11 @@ final class PhoneBridgeController: ObservableObject {
 
     private func sendActiveFileRequest() {
         guard let activePairing, let category = activeFileRequestCategory else { return }
+        let requestID = UUID().uuidString
+        activeFileRequestID = requestID
         let request: [String: Any] = [
             "type": PhoneBridgeProtocol.listFiles,
+            "requestId": requestID,
             "category": category.rawValue,
             "pageSize": Self.maxFilesPerCategory,
             "pageToken": 0
