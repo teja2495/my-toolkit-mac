@@ -446,6 +446,12 @@ final class AppBootstrapper: ObservableObject {
             feature.onVSCodeFolderShortcutsChanged = { [weak self] shortcuts in
                 self?.vscodeFolderShortcuts = shortcuts
             }
+            feature.onCopyLatestPhoneMedia = { [weak self] in
+                self?.phoneIntegrationController().copyLatestMedia()
+            }
+            feature.onCopyPhoneScreenshot = {
+                PhoneScreenshot.copyToPasteboard()
+            }
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
             ensureFeatureExists(TextExpanderFeature())

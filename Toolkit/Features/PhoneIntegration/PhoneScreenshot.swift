@@ -18,6 +18,33 @@ enum PhoneScreenshot {
         }
     }
 
+    @MainActor private static var copyTask: Task<Void, Never>?
+
+    /// Captures the connected phone's screen over ADB and puts the image on the clipboard.
+    /// Ignored while a previous capture is still in flight.
+    @MainActor
+    static func copyToPasteboard() {
+        guard copyTask == nil else { return }
+        copyTask = Task { @MainActor in
+            defer { copyTask = nil }
+            do {
+                let imageData = try await capture()
+                let item = NSPasteboardItem()
+                item.setData(imageData.png, forType: .png)
+                item.setData(imageData.tiff, forType: .tiff)
+
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                if !pasteboard.writeObjects([item]) {
+                    NSSound.beep()
+                }
+            } catch {
+                NSLog("Phone screenshot: %@", error.localizedDescription)
+                NSSound.beep()
+            }
+        }
+    }
+
     static func capture() async throws -> (png: Data, tiff: Data) {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

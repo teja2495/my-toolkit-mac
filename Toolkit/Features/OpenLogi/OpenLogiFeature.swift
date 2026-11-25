@@ -33,7 +33,6 @@ final class OpenLogiFeature: AppFeature {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var pendingSingleClicks: [OpenLogiButton: DispatchWorkItem] = [:]
-    private var phoneScreenshotTask: Task<Void, Never>?
     private lazy var hidppController: LogitechHIDPPController = {
         let controller = LogitechHIDPPController()
         controller.onSmartShiftPressed = { [weak self] in
@@ -52,7 +51,6 @@ final class OpenLogiFeature: AppFeature {
         guard isStarted else { return }
         isStarted = false
         cancelPendingClicks()
-        phoneScreenshotTask?.cancel()
         removeTap()
         hidppController.stop()
     }
@@ -242,27 +240,8 @@ final class OpenLogiFeature: AppFeature {
     }
 
     private func copyPhoneScreenshot() {
-        guard isStarted, phoneScreenshotTask == nil else { return }
-        phoneScreenshotTask = Task { [weak self] in
-            defer { self?.phoneScreenshotTask = nil }
-            do {
-                let imageData = try await PhoneScreenshot.capture()
-                guard !Task.isCancelled else { return }
-                let item = NSPasteboardItem()
-                item.setData(imageData.png, forType: .png)
-                item.setData(imageData.tiff, forType: .tiff)
-
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                if !pasteboard.writeObjects([item]) {
-                    NSSound.beep()
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                NSLog("Phone screenshot: %@", error.localizedDescription)
-                NSSound.beep()
-            }
-        }
+        guard isStarted else { return }
+        PhoneScreenshot.copyToPasteboard()
     }
 
     private static func quitAndReopenFrontmostApp() {

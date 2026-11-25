@@ -185,6 +185,8 @@ final class DockWindowPopupController {
         windows: [WindowInfo]
     )?
     var onPinnedFoldersPersist: (([VSCodeFolderShortcut]) -> Void)?
+    var onCopyLatestPhoneMedia: (() -> Void)?
+    var onCopyPhoneScreenshot: (() -> Void)?
 
     init() {
         hostingController = FirstMouseHostingController(rootView: AnyView(EmptyView()))
@@ -269,6 +271,7 @@ final class DockWindowPopupController {
         let foregroundProcessIdentifier = app.processIdentifier
         let isVSCodeApp = isVSCodeBundle(app.bundleIdentifier)
         let showNewWindowButton = isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)
+        let toolkitActions = isToolkitApp(app) ? makeToolkitActions() : []
         hostingController.rootView = AnyView(
             DockWindowPopupView(
                 appIcon: icon,
@@ -279,6 +282,7 @@ final class DockWindowPopupController {
                 vscodeGitRepos: vscodeGitRepos,
                 isVSCodeApp: isVSCodeApp,
                 showNewWindowButton: showNewWindowButton,
+                toolkitActions: toolkitActions,
                 isAppFocused: isAppFocused,
                 onHide: { [weak self] in
                     self?.closeAllWindows(processIdentifier: app.processIdentifier)
@@ -324,6 +328,50 @@ final class DockWindowPopupController {
             )
         )
         makePanelHierarchyTransparent()
+    }
+
+    private func makeToolkitActions() -> [ToolkitDockAction] {
+        var actions: [ToolkitDockAction] = []
+        if let onCopyLatestPhoneMedia {
+            actions.append(ToolkitDockAction(
+                title: "Copy latest media",
+                systemImage: "photo.on.rectangle",
+                perform: { [weak self] in
+                    self?.hide()
+                    onCopyLatestPhoneMedia()
+                }
+            ))
+        }
+        if let onCopyPhoneScreenshot {
+            actions.append(ToolkitDockAction(
+                title: "Copy phone screenshot",
+                systemImage: "iphone",
+                perform: { [weak self] in
+                    self?.hide()
+                    onCopyPhoneScreenshot()
+                }
+            ))
+        }
+        return actions
+    }
+
+    /// Fits the popup to its widest row: the action titles or the app header (with its hide button).
+    private func toolkitPopupWidth(appName: String, actionTitles: [String]) -> CGFloat {
+        func textWidth(_ text: String, weight: NSFont.Weight) -> CGFloat {
+            ceil((text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: weight)]).width)
+        }
+        // Row: 12 + 28 icon + 10 spacing + text + 4 min spacer + 12.
+        let rowChrome = 12.0 + DockPopupRowStyle.iconSize + 10.0 + 4.0 + 12.0
+        let widestAction = actionTitles.map { textWidth($0, weight: .medium) }.max() ?? 0
+        // Header also reserves room for the 34pt hide button.
+        let header = textWidth(appName, weight: .semibold) + 34.0
+        // 8pt popup padding on each side.
+        // Extra slack so SwiftUI's text layout never ends up a few points short and truncates.
+        return 16.0 + rowChrome + max(widestAction, header) + 16.0
+    }
+
+    private func isToolkitApp(_ app: DockHoveredApplication) -> Bool {
+        app.processIdentifier == getpid()
     }
 
     private func makePanelKeyForSearch() {
@@ -576,7 +624,7 @@ final class DockWindowPopupController {
         for app: DockHoveredApplication,
         windows: [WindowInfo]
     ) -> CGSize {
-        let width = 340.0
+        var width = 340.0
 
         // 8px padding top + bottom, 44px app header, and rows.
         var height = 16.0 + 44.0
@@ -598,6 +646,13 @@ final class DockWindowPopupController {
             }
             // Search field row under shortcuts/results.
             height += 6.0 + 44.0
+        } else if isToolkitApp(app) {
+            let actions = makeToolkitActions()
+            width = toolkitPopupWidth(appName: app.displayName, actionTitles: actions.map(\.title))
+            let rowCount = actions.count
+            if rowCount > 0 {
+                height += 6.0 + CGFloat(rowCount) * 44.0 + CGFloat(rowCount - 1) * 6.0
+            }
         } else {
             let newWindowRow = (isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)) ? 1 : 0
             let rowCount = Array(windows.prefix(8)).count + newWindowRow
@@ -699,6 +754,7 @@ private struct DockWindowPopupView: View {
     @ObservedObject var vscodeGitRepos: VSCodeGitRepoModel
     let isVSCodeApp: Bool
     let showNewWindowButton: Bool
+    let toolkitActions: [ToolkitDockAction]
     let isAppFocused: Bool
     let onHide: () -> Void
     let onOpen: (WindowInfo) -> Void
@@ -798,6 +854,10 @@ private struct DockWindowPopupView: View {
                     onMoveDown: vscodeFolderSearch.selectNextResult,
                     onSubmit: openSelectedVSCodeSearchResult
                 )
+                } else if !toolkitActions.isEmpty {
+                    ForEach(toolkitActions) { action in
+                        ToolkitActionRow(action: action)
+                    }
                 } else {
                     ForEach(windows) { window in
                         WindowRow(
@@ -1148,6 +1208,7 @@ private struct WindowRow: View {
     var gitAction: WindowRowGitAction? = nil
     var runAction: WindowRowRunAction? = nil
     var branchName: String? = nil
+    @State private var isHovered = false
 
     private var hasContextActions: Bool {
         onPin != nil || onUnpin != nil
@@ -1210,9 +1271,12 @@ private struct WindowRow: View {
         .frame(height: DockPopupRowStyle.height)
         .background(
             RoundedRectangle(cornerRadius: DockPopupRowStyle.cornerRadius, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.34) : Color.white.opacity(0.07))
+                .fill(backgroundColor)
         )
         .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
+        }
         .onTapGesture {
             onOpen?()
         }
@@ -1234,6 +1298,50 @@ private struct WindowRow: View {
         } else {
             row
         }
+    }
+
+    private var backgroundColor: Color {
+        if isSelected { return Color.accentColor.opacity(0.34) }
+        return Color.white.opacity(isHovered && onOpen != nil ? 0.16 : 0.07)
+    }
+}
+
+private struct ToolkitDockAction: Identifiable {
+    let title: String
+    let systemImage: String
+    let perform: () -> Void
+
+    var id: String { title }
+}
+
+private struct ToolkitActionRow: View {
+    let action: ToolkitDockAction
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: action.systemImage)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: DockPopupRowStyle.iconSize, height: DockPopupRowStyle.iconSize)
+            Text(action.title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: DockPopupRowStyle.height)
+        .background(
+            RoundedRectangle(cornerRadius: DockPopupRowStyle.cornerRadius, style: .continuous)
+                .fill(Color.white.opacity(isHovered ? 0.16 : 0.07))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) { isHovered = hovering }
+        }
+        .onTapGesture(perform: action.perform)
     }
 }
 

@@ -7,6 +7,13 @@ final class DockWindowHoverFeature: AppFeature {
     var popupDelay: TimeInterval = 0.25
     var vscodeFolderShortcuts: [VSCodeFolderShortcut] = []
     var onVSCodeFolderShortcutsChanged: (([VSCodeFolderShortcut]) -> Void)?
+    /// Actions shown when hovering Toolkit's own Dock icon (mirrors the mouse-button actions).
+    var onCopyLatestPhoneMedia: (() -> Void)? {
+        didSet { popupController.onCopyLatestPhoneMedia = onCopyLatestPhoneMedia }
+    }
+    var onCopyPhoneScreenshot: (() -> Void)? {
+        didSet { popupController.onCopyPhoneScreenshot = onCopyPhoneScreenshot }
+    }
     var isSuspended: Bool = false {
         didSet {
             lastPolledMouseLocation = nil
@@ -150,7 +157,8 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         let isVSCode = isVSCodeBundle(hoveredApplication.bundleIdentifier)
-        if isVSCode {
+        let isToolkit = hoveredApplication.processIdentifier == getpid()
+        if isVSCode || isToolkit {
             cachedWindows = []
             lastWindowRefreshDate = Date()
         } else if !isSameApp || shouldRefreshWindows() {
@@ -162,8 +170,8 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         // Only show the popup when there's more than one window to pick from
-        // (VS Code always shows its folder launcher).
-        if !isVSCode && cachedWindows.count <= 1 {
+        // (VS Code always shows its folder launcher; Toolkit always shows its actions).
+        if !isVSCode && !isToolkit && cachedWindows.count <= 1 {
             popupController.hide()
             lastHoveredApplication = hoveredApplication
             pendingHoveredApplication = nil
@@ -177,7 +185,7 @@ final class DockWindowHoverFeature: AppFeature {
 
         if isSameApp && !shouldReshowAfterSingleWindow {
             // VS Code popup owns local search state/focus; avoid rebuilding it every poll tick.
-            if !isVSCode {
+            if !isVSCode && !isToolkit {
                 popupController.updateContent(
                     for: hoveredApplication,
                     windows: cachedWindows,
