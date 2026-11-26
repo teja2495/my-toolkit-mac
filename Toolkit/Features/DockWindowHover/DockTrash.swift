@@ -4,6 +4,17 @@ import Foundation
 /// without needing Full Disk Access.
 enum DockTrash {
     static func hasItems() -> Bool {
+        // Fast path: the home-volume trash, readable when Toolkit has Full Disk Access.
+        if let trashURL = FileManager.default.urls(for: .trashDirectory, in: .userDomainMask).first,
+           let contents = try? FileManager.default.contentsOfDirectory(
+               at: trashURL,
+               includingPropertiesForKeys: nil,
+               options: [.skipsHiddenFiles]
+           ),
+           !contents.isEmpty {
+            return true
+        }
+
         let source = """
         with timeout of 2 seconds
             tell application "Finder" to count items of trash
