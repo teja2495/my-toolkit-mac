@@ -38,7 +38,7 @@ struct PhoneIntegrationSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 deviceHeader
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 12)
 
                 pairingCard
 
@@ -100,23 +100,25 @@ struct PhoneIntegrationSettingsView: View {
     // MARK: - Device header
 
     private var deviceHeader: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
                 PhoneDeviceGlyph(isConnected: isBrowsingAvailable, isError: isConnectionError && !isBrowsingAvailable)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(headerTitle)
-                        .font(.system(size: 19, weight: .semibold, design: .rounded))
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)
 
                     Text(headerSubtitle)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(isConnectionError ? Color.orange : Color.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(headerSubtitle)
                 }
 
                 Spacer(minLength: 12)
@@ -148,8 +150,8 @@ struct PhoneIntegrationSettingsView: View {
                     .help(isDeviceDrawerExpanded ? "Hide devices" : "Show nearby and paired phones")
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             if isDeviceDrawerExpanded {
                 Rectangle()
@@ -157,7 +159,7 @@ struct PhoneIntegrationSettingsView: View {
                     .frame(height: 1)
 
                 deviceDrawer
-                    .padding(18)
+                    .padding(14)
                     .transition(.opacity)
             }
         }
@@ -1245,20 +1247,20 @@ private struct PhoneDeviceGlyph: View {
             if isConnected && !reduceMotion {
                 Circle()
                     .stroke(Color.green.opacity(0.45), lineWidth: 1.5)
-                    .frame(width: 46, height: 46)
+                    .frame(width: 32, height: 32)
                     .scaleEffect(isPulsing ? 1.3 : 1)
                     .opacity(isPulsing ? 0 : 0.9)
             }
 
             Circle()
                 .fill(tint.opacity(isConnected ? 0.18 : 0.1))
-                .frame(width: 46, height: 46)
+                .frame(width: 32, height: 32)
 
             Image(systemName: "smartphone")
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(tint)
         }
-        .frame(width: 52, height: 52)
+        .frame(width: 36, height: 36)
         .onAppear(perform: restartPulse)
         .onChange(of: isConnected) {
             restartPulse()
