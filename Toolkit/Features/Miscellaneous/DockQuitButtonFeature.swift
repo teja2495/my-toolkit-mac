@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Shows a small round "×" badge on the top-right corner of a running app's Dock icon while the
-/// cursor rests on it. Clicking the badge quits that app.
+/// cursor rests on it. Clicking the badge quits that app. Apps pinned to the Dock are skipped.
 @MainActor
 final class DockQuitButtonFeature: AppFeature {
     let id = "dock-quit-button"
@@ -18,6 +18,8 @@ final class DockQuitButtonFeature: AppFeature {
     /// After quitting, keep the badge hidden for that Dock item until the cursor leaves it.
     private var suppressedProcessIdentifier: pid_t?
     private var lastPolledMouseLocation: CGPoint?
+    private var pinnedBundleIDs: Set<String> = []
+    private var pinnedBundleIDsLoadedAt: Date = .distantPast
 
     func start() {
         guard pollTimer == nil else { return }
@@ -41,6 +43,7 @@ final class DockQuitButtonFeature: AppFeature {
         currentApplication = nil
         suppressedProcessIdentifier = nil
         lastPolledMouseLocation = nil
+        pinnedBundleIDsLoadedAt = .distantPast
         badgeController.hide()
     }
 
@@ -60,6 +63,7 @@ final class DockQuitButtonFeature: AppFeature {
             let hovered = hoverDetector.hoveredApplication(at: mouseLocation),
             hovered.processIdentifier > 0,
             !Self.excludedBundleIDs.contains(hovered.bundleIdentifier ?? ""),
+            !isPinnedToDock(hovered),
             NSRunningApplication(processIdentifier: hovered.processIdentifier)?.isTerminated == false
         else {
             currentApplication = nil
@@ -76,6 +80,27 @@ final class DockQuitButtonFeature: AppFeature {
 
         currentApplication = hovered
         badgeController.show(at: hovered.dockItemFrame)
+    }
+
+    private func isPinnedToDock(_ application: DockHoveredApplication) -> Bool {
+        guard let bundleIdentifier = application.bundleIdentifier else { return false }
+        // Re-read at most every few seconds so pinning/unpinning is picked up without polling prefs per tick.
+        if Date().timeIntervalSince(pinnedBundleIDsLoadedAt) > 3 {
+            pinnedBundleIDs = Self.loadPinnedBundleIDs()
+            pinnedBundleIDsLoadedAt = Date()
+        }
+        return pinnedBundleIDs.contains(bundleIdentifier)
+    }
+
+    private static func loadPinnedBundleIDs() -> Set<String> {
+        let dockDomain = "com.apple.dock" as CFString
+        CFPreferencesAppSynchronize(dockDomain)
+        guard let items = CFPreferencesCopyAppValue("persistent-apps" as CFString, dockDomain) as? [[String: Any]] else {
+            return []
+        }
+        return Set(items.compactMap { item in
+            (item["tile-data"] as? [String: Any])?["bundle-identifier"] as? String
+        })
     }
 
     private func quitCurrentApplication() {
