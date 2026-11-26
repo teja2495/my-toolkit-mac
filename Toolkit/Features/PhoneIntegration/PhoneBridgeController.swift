@@ -66,6 +66,7 @@ final class PhoneBridgeController: ObservableObject {
                 latestMediaDownloadTimeout?.cancel()
                 latestMediaDownloadTimeout = nil
                 latestMediaCopyState = nil
+                failScreenCaptures(PhoneBridgeControllerError.connectionClosed)
             }
             updateClipboardMonitoringIfNeeded()
         }
@@ -80,6 +81,7 @@ final class PhoneBridgeController: ObservableObject {
     private var activeFileRequestCategory: PhoneFileCategory?
     private var activeFileRequestID: String?
     private var activeFileTransfers: [String: ActiveFileTransfer] = [:]
+    private var activeScreenCaptures: [String: ActiveScreenCapture] = [:]
     private enum LatestMediaCopyState {
         case preparing
         case awaitingStaleList
@@ -443,6 +445,69 @@ final class PhoneBridgeController: ObservableObject {
         return requestID
     }
 
+    /// Whether the companion app is connected over the network bridge and can answer requests.
+    var isBridgeConnected: Bool {
+        guard activePairing != nil, case .connected = connectionState else { return false }
+        return true
+    }
+
+    /// Asks the companion app to capture the phone screen; completes with PNG data.
+    func requestScreenCapture(completion: @escaping (Result<Data, Error>) -> Void) {
+        guard isBridgeConnected, let activePairing else {
+            refreshConnectionData()
+            completion(.failure(PhoneBridgeControllerError.noScreenCaptureConnection))
+            return
+        }
+        let requestID = UUID().uuidString
+        activeScreenCaptures[requestID] = ActiveScreenCapture(completion: completion)
+        sendEncrypted(
+            ["type": PhoneBridgeProtocol.captureScreen, "requestId": requestID],
+            pairing: activePairing
+        )
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            self?.finishScreenCapture(requestID: requestID, result: .failure(PhoneBridgeControllerError.screenCaptureTimedOut))
+        }
+    }
+
+    private func handleScreenCaptureResult(_ json: [String: Any]) {
+        guard let requestID = json["requestId"] as? String,
+              var capture = activeScreenCaptures[requestID] else { return }
+        guard let chunkIndex = json["chunkIndex"] as? Int,
+              let totalChunks = json["totalChunks"] as? Int,
+              let dataString = json["data"] as? String,
+              let chunkData = Data(base64Encoded: dataString, options: [.ignoreUnknownCharacters]),
+              chunkIndex == capture.nextChunkIndex,
+              totalChunks > 0 else {
+            finishScreenCapture(requestID: requestID, result: .failure(PhoneBridgeControllerError.invalidFileTransferResponse))
+            return
+        }
+        capture.buffer.append(chunkData)
+        capture.nextChunkIndex += 1
+        activeScreenCaptures[requestID] = capture
+        if capture.nextChunkIndex == totalChunks {
+            finishScreenCapture(requestID: requestID, result: .success(capture.buffer))
+        }
+    }
+
+    private func handleScreenCaptureErrorIfNeeded(_ json: [String: Any]) -> Bool {
+        guard let requestID = json["requestId"] as? String,
+              activeScreenCaptures[requestID] != nil else { return false }
+        let message = (json["message"] as? String) ?? "Android couldn't capture the screen."
+        finishScreenCapture(requestID: requestID, result: .failure(PhoneBridgeControllerError.remoteFileTransferFailed(message)))
+        return true
+    }
+
+    private func finishScreenCapture(requestID: String, result: Result<Data, Error>) {
+        activeScreenCaptures.removeValue(forKey: requestID)?.completion(result)
+    }
+
+    private func failScreenCaptures(_ error: Error) {
+        let captures = activeScreenCaptures
+        activeScreenCaptures = [:]
+        captures.values.forEach { $0.completion(.failure(error)) }
+    }
+
     func queueFilesForRemoteShare(_ urls: [URL]) {
         let normalizedURLs = urls.filter(\.isFileURL)
         guard !normalizedURLs.isEmpty else { return }
@@ -635,8 +700,12 @@ final class PhoneBridgeController: ObservableObject {
                         self.handleSetClipboardMessage(json, pairing: pairing)
                     } else if messageType == PhoneBridgeProtocol.setClipboardResult {
                         self.handleSetClipboardResult(json)
+                    } else if messageType == PhoneBridgeProtocol.captureScreenResult {
+                        self.handleScreenCaptureResult(json)
                     } else if messageType == PhoneBridgeProtocol.error {
-                        if self.handleFileTransferErrorIfNeeded(json) || self.handleShareTransferErrorIfNeeded(json) {
+                        if self.handleScreenCaptureErrorIfNeeded(json)
+                            || self.handleFileTransferErrorIfNeeded(json)
+                            || self.handleShareTransferErrorIfNeeded(json) {
                             self.receiveEncryptedMessages(pairing: pairing)
                             return
                         }
@@ -1965,6 +2034,12 @@ final class PhoneBridgeController: ObservableObject {
     }
 }
 
+private struct ActiveScreenCapture {
+    let completion: (Result<Data, Error>) -> Void
+    var buffer = Data()
+    var nextChunkIndex = 0
+}
+
 private struct ActiveFileTransfer {
     let file: PhoneFileItem
     let completion: (Result<URL, Error>) -> Void
@@ -2030,6 +2105,8 @@ enum PhoneBridgeControllerError: LocalizedError {
     case invalidShareTransferResponse
     case remoteFileTransferFailed(String)
     case unsupportedShareSource(String)
+    case noScreenCaptureConnection
+    case screenCaptureTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -2051,6 +2128,10 @@ enum PhoneBridgeControllerError: LocalizedError {
             return message
         case .unsupportedShareSource(let name):
             return "\(name) is not a regular file."
+        case .noScreenCaptureConnection:
+            return "Connect the phone over ADB or the Toolkit companion app to take a screenshot."
+        case .screenCaptureTimedOut:
+            return "The phone didn't return a screenshot in time."
         }
     }
 }

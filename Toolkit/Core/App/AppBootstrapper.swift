@@ -449,8 +449,9 @@ final class AppBootstrapper: ObservableObject {
             feature.onCopyLatestPhoneMedia = { [weak self] in
                 self?.phoneIntegrationController().copyLatestMedia()
             }
-            feature.onCopyPhoneScreenshot = {
-                PhoneScreenshot.copyToPasteboard()
+            feature.onCopyPhoneScreenshot = { [weak self] in
+                guard let self else { return }
+                PhoneScreenshot.copyToPasteboard(bridge: self.phoneIntegrationController())
             }
             ensureFeatureExists(feature)
             ensureFeatureExists(WritingFixFeature())
@@ -459,6 +460,9 @@ final class AppBootstrapper: ObservableObject {
                 (self?.liveFeatures["screen-capture"] as? ScreenCaptureFeature)?.captureSelection()
             } onCopyLatestPhoneMedia: { [weak self] in
                 self?.phoneIntegrationController().copyLatestMedia()
+            } onCopyPhoneScreenshot: { [weak self] in
+                guard let self else { return }
+                PhoneScreenshot.copyToPasteboard(bridge: self.phoneIntegrationController())
             })
             ensureFeatureExists(WindowShortcutsFeature())
             ensureFeatureExists(DockQuitButtonFeature())

@@ -13,22 +13,23 @@ enum PhoneScreenshot {
             case .captureFailed:
                 return "ADB screen capture failed. Check that one Android device is connected and authorized."
             case .invalidImage:
-                return "ADB did not return a valid PNG screenshot."
+                return "The phone did not return a valid PNG screenshot."
             }
         }
     }
 
     @MainActor private static var copyTask: Task<Void, Never>?
 
-    /// Captures the connected phone's screen over ADB and puts the image on the clipboard.
+    /// Captures the phone's screen and puts the image on the clipboard. Uses ADB when it works,
+    /// otherwise asks the companion app over the network bridge.
     /// Ignored while a previous capture is still in flight.
     @MainActor
-    static func copyToPasteboard() {
+    static func copyToPasteboard(bridge: PhoneBridgeController) {
         guard copyTask == nil else { return }
         copyTask = Task { @MainActor in
             defer { copyTask = nil }
             do {
-                let imageData = try await capture()
+                let imageData = try await capture(bridge: bridge)
                 let item = NSPasteboardItem()
                 item.setData(imageData.png, forType: .png)
                 item.setData(imageData.tiff, forType: .tiff)
@@ -42,6 +43,23 @@ enum PhoneScreenshot {
                 NSLog("Phone screenshot: %@", error.localizedDescription)
                 NSSound.beep()
             }
+        }
+    }
+
+    @MainActor
+    private static func capture(bridge: PhoneBridgeController) async throws -> (png: Data, tiff: Data) {
+        do {
+            return try await capture()
+        } catch {
+            guard bridge.isBridgeConnected else {
+                // Kick off a reconnect so the next attempt can use the companion app.
+                bridge.refreshConnectionData()
+                throw error
+            }
+            let png = try await withCheckedThrowingContinuation { continuation in
+                bridge.requestScreenCapture { continuation.resume(with: $0) }
+            }
+            return try decodedPNG(png)
         }
     }
 
@@ -78,6 +96,10 @@ enum PhoneScreenshot {
         guard process.terminationReason == .exit, process.terminationStatus == 0 else {
             throw CaptureError.captureFailed
         }
+        return try decodedPNG(png)
+    }
+
+    private static func decodedPNG(_ png: Data) throws -> (png: Data, tiff: Data) {
         guard png.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]),
               let bitmap = NSBitmapImageRep(data: png),
               let tiff = bitmap.tiffRepresentation else {

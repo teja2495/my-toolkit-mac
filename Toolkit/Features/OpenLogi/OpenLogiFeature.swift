@@ -11,10 +11,16 @@ final class OpenLogiFeature: AppFeature {
 
     private let onScreenshot: () -> Void
     private let onCopyLatestPhoneMedia: () -> Void
+    private let onCopyPhoneScreenshot: () -> Void
 
-    init(onScreenshot: @escaping () -> Void, onCopyLatestPhoneMedia: @escaping () -> Void) {
+    init(
+        onScreenshot: @escaping () -> Void,
+        onCopyLatestPhoneMedia: @escaping () -> Void,
+        onCopyPhoneScreenshot: @escaping () -> Void
+    ) {
         self.onScreenshot = onScreenshot
         self.onCopyLatestPhoneMedia = onCopyLatestPhoneMedia
+        self.onCopyPhoneScreenshot = onCopyPhoneScreenshot
     }
 
     var buttonActions: [OpenLogiButton: MouseButtonAction] = [:] {
@@ -241,7 +247,7 @@ final class OpenLogiFeature: AppFeature {
 
     private func copyPhoneScreenshot() {
         guard isStarted else { return }
-        PhoneScreenshot.copyToPasteboard()
+        onCopyPhoneScreenshot()
     }
 
     private static func quitAndReopenFrontmostApp() {
