@@ -158,7 +158,11 @@ final class DockWindowHoverFeature: AppFeature {
 
         let isVSCode = isVSCodeBundle(hoveredApplication.bundleIdentifier)
         let isToolkit = hoveredApplication.processIdentifier == getpid()
-        if isVSCode || isToolkit {
+        let isTrash = hoveredApplication.isTrash
+        if isTrash && !isSameApp {
+            trashHasItems = DockTrash.hasItems()
+        }
+        if isVSCode || isToolkit || isTrash {
             cachedWindows = []
             lastWindowRefreshDate = Date()
         } else if !isSameApp || shouldRefreshWindows() {
@@ -170,8 +174,10 @@ final class DockWindowHoverFeature: AppFeature {
         }
 
         // Only show the popup when there's more than one window to pick from
-        // (VS Code always shows its folder launcher; Toolkit always shows its actions).
-        if !isVSCode && !isToolkit && cachedWindows.count <= 1 {
+        // (VS Code always shows its folder launcher; Toolkit always shows its actions;
+        // Trash shows "Empty Trash" only when it has items).
+        let showsActionPopup = isVSCode || isToolkit || (isTrash && trashHasItems)
+        if !showsActionPopup && cachedWindows.count <= 1 {
             popupController.hide()
             lastHoveredApplication = hoveredApplication
             pendingHoveredApplication = nil
@@ -185,7 +191,7 @@ final class DockWindowHoverFeature: AppFeature {
 
         if isSameApp && !shouldReshowAfterSingleWindow {
             // VS Code popup owns local search state/focus; avoid rebuilding it every poll tick.
-            if !isVSCode && !isToolkit {
+            if !isVSCode && !isToolkit && !isTrash {
                 popupController.updateContent(
                     for: hoveredApplication,
                     windows: cachedWindows,
@@ -205,6 +211,7 @@ final class DockWindowHoverFeature: AppFeature {
     }
 
     private var isPopupHiddenForSingleWindow = false
+    private var trashHasItems = false
 
     private func shouldRefreshWindows() -> Bool {
         Date().timeIntervalSince(lastWindowRefreshDate) >= 0.8

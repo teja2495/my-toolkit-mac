@@ -59,6 +59,18 @@ final class DockHoverDetector {
                 return resolveRunningApplication(from: element)
             }
 
+            if isTrashDockItem(element) {
+                guard let dockItemFrame = frame(of: element) else { return nil }
+                return DockHoveredApplication(
+                    processIdentifier: -1,
+                    bundleIdentifier: nil,
+                    bundleURL: nil,
+                    displayName: "Trash",
+                    dockItemFrame: dockItemFrame,
+                    isTrash: true
+                )
+            }
+
             currentElement = parentElement(of: element)
         }
 
@@ -68,6 +80,10 @@ final class DockHoverDetector {
     private func isApplicationDockItem(_ element: AXUIElement) -> Bool {
         let subrole = stringAttribute(kAXSubroleAttribute as String, from: element)
         return subrole == "AXApplicationDockItem"
+    }
+
+    private func isTrashDockItem(_ element: AXUIElement) -> Bool {
+        stringAttribute(kAXSubroleAttribute as String, from: element) == "AXTrashDockItem"
     }
 
     private func resolveRunningApplication(from element: AXUIElement) -> DockHoveredApplication? {

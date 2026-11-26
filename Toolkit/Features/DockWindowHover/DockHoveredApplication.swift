@@ -6,10 +6,13 @@ struct DockHoveredApplication: Equatable {
     let bundleURL: URL?
     let displayName: String
     let dockItemFrame: CGRect
+    /// True for the Dock's Trash item (not a running app).
+    var isTrash: Bool = false
 
     static func == (lhs: DockHoveredApplication, rhs: DockHoveredApplication) -> Bool {
         lhs.processIdentifier == rhs.processIdentifier
             && lhs.bundleIdentifier == rhs.bundleIdentifier
+            && lhs.isTrash == rhs.isTrash
     }
 }
 

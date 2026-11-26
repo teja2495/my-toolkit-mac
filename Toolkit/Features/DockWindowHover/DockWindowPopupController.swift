@@ -266,12 +266,14 @@ final class DockWindowPopupController {
     ) {
         latestPreferredSizeInputs = (app, windows)
         let runningApp = NSRunningApplication(processIdentifier: app.processIdentifier)
-        let icon = runningApp?.icon ?? app.bundleURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
+        let icon = app.isTrash
+            ? NSImage(named: NSImage.trashFullName)
+            : runningApp?.icon ?? app.bundleURL.map { NSWorkspace.shared.icon(forFile: $0.path) }
         let isAppFocused = runningApp?.isActive ?? false
         let foregroundProcessIdentifier = app.processIdentifier
         let isVSCodeApp = isVSCodeBundle(app.bundleIdentifier)
         let showNewWindowButton = isChromeBundle(app.bundleIdentifier) || isXcodeBundle(app.bundleIdentifier)
-        let toolkitActions = isToolkitApp(app) ? makeToolkitActions() : []
+        let toolkitActions = actionRows(for: app)
         hostingController.rootView = AnyView(
             DockWindowPopupView(
                 appIcon: icon,
@@ -328,6 +330,22 @@ final class DockWindowPopupController {
             )
         )
         makePanelHierarchyTransparent()
+    }
+
+    private func actionRows(for app: DockHoveredApplication) -> [ToolkitDockAction] {
+        if app.isTrash { return makeTrashActions() }
+        return isToolkitApp(app) ? makeToolkitActions() : []
+    }
+
+    private func makeTrashActions() -> [ToolkitDockAction] {
+        [ToolkitDockAction(
+            title: "Empty Trash",
+            systemImage: "trash",
+            perform: { [weak self] in
+                self?.hide()
+                DockTrash.empty()
+            }
+        )]
     }
 
     private func makeToolkitActions() -> [ToolkitDockAction] {
@@ -646,8 +664,8 @@ final class DockWindowPopupController {
             }
             // Search field row under shortcuts/results.
             height += 6.0 + 44.0
-        } else if isToolkitApp(app) {
-            let actions = makeToolkitActions()
+        } else if isToolkitApp(app) || app.isTrash {
+            let actions = actionRows(for: app)
             width = toolkitPopupWidth(appName: app.displayName, actionTitles: actions.map(\.title))
             let rowCount = actions.count
             if rowCount > 0 {
